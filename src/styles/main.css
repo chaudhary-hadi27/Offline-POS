@@ -1,0 +1,235 @@
+/* Self-hosted fonts - bundled by Vite, zero network calls at runtime. */
+@import '@fontsource/manrope/600.css';
+@import '@fontsource/manrope/700.css';
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* GNOME/Yaru-style snappy ease-out (not Material's 0.4,0,0.2,1) -
+     fast initial movement that settles smoothly, no linear-feeling start. */
+  --ease-ubuntu: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ---------- Night Shift Mode ----------
+   Backgrounds swap to obsidian; crimson accents are deliberately
+   NOT overridden here, so branding stays identical in both themes. */
+[data-theme='dark'] body {
+  background-color: #0f172a;
+  color: #e5e7eb;
+}
+[data-theme='dark'] .surface-panel {
+  background-color: #161f36;
+  border-color: #26314d;
+}
+[data-theme='dark'] .text-ink {
+  color: #e5e7eb;
+}
+[data-theme='dark'] .text-ink-secondary {
+  color: #cbd5e1;
+}
+
+/* ---------- Ripple (click feedback, spec section 3) ---------- */
+.ripple-host {
+  position: relative;
+  overflow: hidden;
+}
+/* When an element also needs to be positioned absolutely (e.g. a small
+   overlay button pinned to a corner of an image), the two-class selector
+   below wins over the single-class rule above so .absolute isn't silently
+   cancelled out - without this, ripple-host's `position: relative` (later
+   in the cascade than Tailwind's utilities) overrides `.absolute` and the
+   element falls back into normal document flow instead of being pinned. */
+.ripple-host.absolute {
+  position: absolute;
+}
+.ripple-span {
+  position: absolute;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.55);
+  transform: scale(0);
+  pointer-events: none;
+  animation: ripple-expand 550ms var(--ease-ubuntu);
+}
+[data-theme='dark'] .ripple-span {
+  background: rgba(255, 255, 255, 0.25);
+}
+@keyframes ripple-expand {
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+/* ---------- Workspace sliding (page switch) ---------- */
+.route-layer {
+  position: absolute;
+  inset: 0;
+  transition: transform 320ms var(--ease-ubuntu), opacity 320ms var(--ease-ubuntu);
+  will-change: transform, opacity;
+}
+.route-layer--entering {
+  transform: translateX(100%);
+  opacity: 0;
+}
+.route-layer--active {
+  transform: translateX(0);
+  opacity: 1;
+}
+.route-layer--exiting {
+  transform: translateX(-100%);
+  opacity: 0;
+}
+
+/* ---------- Persistent dock: auto-slide + staggered icon reveal ---------- */
+.dock {
+  transition: width 280ms var(--ease-ubuntu);
+}
+.dock-icon {
+  opacity: 0;
+  transform: translateX(-8px);
+  animation: dock-icon-in 260ms var(--ease-ubuntu) forwards;
+}
+@keyframes dock-icon-in {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ---------- Cart line appear (New Order) ----------
+   Replaces the instant/"jerky" innerHTML swap with a soft slide-in
+   from the right, so adding an item never feels like a hard snap. */
+.cart-line-enter {
+  animation: cart-line-in 240ms var(--ease-ubuntu) forwards;
+}
+@keyframes cart-line-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ---------- Side panel slide-in (e.g. Menu Setup's Add/Edit Item) ----------
+   Same proven pattern as .sheet-slide-up below, just horizontal. Toggling
+   the "is-open" class (instead of a raw translate-x-full Tailwind utility)
+   guarantees the duration/easing actually apply - a bare utility class
+   name that isn't in Tailwind's scale (e.g. "duration-280") silently does
+   nothing, which is what caused the old jerky, non-animated open. */
+.panel-slide-in {
+  transition: transform 300ms var(--ease-ubuntu);
+  transform: translateX(100%);
+  will-change: transform;
+}
+.panel-slide-in.is-open {
+  transform: translateX(0);
+}
+
+/* ---------- Modal / command palette backdrop ---------- */
+.scrim-enter {
+  animation: scrim-fade-in 200ms var(--ease-ubuntu) forwards;
+}
+@keyframes scrim-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.modal-pop {
+  animation: modal-pop-in 260ms var(--ease-ubuntu) forwards;
+  will-change: transform, opacity;
+}
+@keyframes modal-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Add Item panel + Add Customer modal: these two scrims are built once
+   and toggled via the "hidden" class (not created fresh each time like
+   the gallery-picker/command-palette scrims above), so they need a real
+   opacity:0 starting point - otherwise the dark+blur backdrop renders at
+   full strength the instant "hidden" is removed, then the .scrim-enter
+   keyframe (which starts its own "from: opacity 0") snaps it back down
+   and fades it back up a frame later. A plain transition avoids that
+   double-flash entirely. */
+.panel-scrim,
+.ac-scrim {
+  opacity: 0;
+  transition: opacity 220ms var(--ease-ubuntu);
+}
+.panel-scrim.scrim-enter,
+.ac-scrim.scrim-enter {
+  animation: none;
+  opacity: 1;
+}
+
+/* ---------- Window dimming for background sub-panels ---------- */
+.win-dim {
+  filter: brightness(0.75);
+  transition: filter 200ms var(--ease-ubuntu);
+}
+
+/* ---------- Shortcut sheet slide-up ---------- */
+.sheet-slide-up {
+  transition: transform 280ms var(--ease-ubuntu);
+  transform: translateY(100%);
+}
+.sheet-slide-up.is-open {
+  transform: translateY(0);
+}
+
+/* ---------- Cart customer search (New Order) ----------
+   Click-to-reveal search box: collapsed to 0 height so it never
+   reserves space in the layout, expands with a smooth height+fade
+   using a generous max-height ceiling (animating to a "real" height
+   isn't possible in pure CSS since content is dynamic). */
+.search-collapse {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 260ms var(--ease-ubuntu), opacity 200ms var(--ease-ubuntu);
+}
+.search-collapse.is-open {
+  max-height: 320px;
+  opacity: 1;
+}
+
+/* Respect reduced-motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  .route-layer,
+  .dock,
+  .dock-icon,
+  .ripple-span,
+  .scrim-enter,
+  .modal-pop,
+  .panel-slide-in,
+  .sheet-slide-up,
+  .search-collapse,
+  .panel-scrim,
+  .ac-scrim {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* Tabular numerals wherever money/quantities render - keeps totals
+   from jittering horizontally as digits change (Phase 3+). */
+.font-nums {
+  font-variant-numeric: tabular-nums;
+}

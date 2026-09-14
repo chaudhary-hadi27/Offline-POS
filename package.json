@@ -1,0 +1,80 @@
+{
+  "name": "restaurant-pos",
+  "version": "1.0.0",
+  "description": "100% offline Restaurant POS - Electron + SQLite, Ubuntu-inspired UI, Windows target",
+  "main": "electron/main.js",
+  "author": "Client Restaurant",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build:renderer": "vite build",
+    "start": "electron .",
+    "postinstall": "electron-builder install-app-deps",
+    "predist:win": "node scripts/generate-master-secret-file.js && node scripts/download-chrome.js",
+    "dist:win": "npm run build:renderer && electron-builder --win --x64",
+    "master-key": "node scripts/compute-master-key.js",
+    "db:test": "node electron/database/__selftest__.js",
+    "db:test:extended": "node electron/database/__selftest_extended__.js",
+    "db:test:all": "npm run db:test && npm run db:test:extended"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/manrope": "^5.3.0",
+    "better-sqlite3": "^11.10.0",
+    "whatsapp-web.js": "^1.26.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.5.4",
+    "electron": "^31.3.1",
+    "electron-builder": "^24.13.3",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^3.4.19",
+    "vite": "^5.4.2"
+  },
+  "build": {
+    "appId": "com.restaurant.pos",
+    "productName": "Restaurant POS",
+    "copyright": "Copyright © 2026 Client Restaurant",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/whatsapp-web.js/**/*",
+      "node_modules/puppeteer/**/*",
+      "node_modules/puppeteer-core/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": ".puppeteer-cache",
+        "to": "puppeteer-cache"
+      }
+    ],
+    "publish": null,
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    }
+  }
+}

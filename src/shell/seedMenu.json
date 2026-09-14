@@ -1,0 +1,813 @@
+[
+  {
+    "category": "Pizzas (Large)",
+    "name": "Crown Crust",
+    "nameUrdu": "کراؤن کرسٹ",
+    "price": 1100
+  },
+  {
+    "category": "Pizzas (Large)",
+    "name": "Supreme",
+    "nameUrdu": "سپریم پیزا",
+    "price": 1200
+  },
+  {
+    "category": "Pizzas (Large)",
+    "name": "Stuff Crust",
+    "nameUrdu": "اسٹف کرسٹ",
+    "price": 1100
+  },
+  {
+    "category": "Pizzas (Large)",
+    "name": "Al Special",
+    "nameUrdu": "ال اسپیشل",
+    "price": 1200
+  },
+  {
+    "category": "Pizzas (Large)",
+    "name": "Malai Boti",
+    "nameUrdu": "ملائی بوٹی",
+    "price": 1100
+  },
+  {
+    "category": "Pizzas (Large)",
+    "name": "Peproni",
+    "nameUrdu": "پیپرونی",
+    "price": 1200
+  },
+  {
+    "category": "Pizzas (Large)",
+    "name": "Royal Kabab",
+    "nameUrdu": "رائل کباب",
+    "price": 1100
+  },
+  {
+    "category": "Pizzas (Large)",
+    "name": "Lazania",
+    "nameUrdu": "لازانیا",
+    "price": 1200
+  },
+  {
+    "category": "Yummy Pizza Flavours",
+    "name": "Cheese Lover",
+    "nameUrdu": "چیز لور",
+    "price": 600,
+    "priceVariants": [
+      {
+        "label": "Single - Small (7\")",
+        "price": 600
+      },
+      {
+        "label": "Single - Medium (10\")",
+        "price": 800
+      },
+      {
+        "label": "Single - Large (13\")",
+        "price": 1200
+      },
+      {
+        "label": "Double - Small (7\")",
+        "price": 1100
+      },
+      {
+        "label": "Double - Medium (10\")",
+        "price": 1500
+      },
+      {
+        "label": "Double - Large (13\")",
+        "price": 2300
+      }
+    ]
+  },
+  {
+    "category": "Yummy Pizza Flavours",
+    "name": "Chic-Supreme",
+    "nameUrdu": "چک سپریم",
+    "price": 600,
+    "priceVariants": [
+      {
+        "label": "Single - Small (7\")",
+        "price": 600
+      },
+      {
+        "label": "Single - Medium (10\")",
+        "price": 800
+      },
+      {
+        "label": "Single - Large (13\")",
+        "price": 1200
+      },
+      {
+        "label": "Double - Small (7\")",
+        "price": 1100
+      },
+      {
+        "label": "Double - Medium (10\")",
+        "price": 1500
+      },
+      {
+        "label": "Double - Large (13\")",
+        "price": 2300
+      }
+    ]
+  },
+  {
+    "category": "Yummy Pizza Flavours",
+    "name": "Kabab Crust",
+    "nameUrdu": "کباب کرسٹ",
+    "price": 600,
+    "priceVariants": [
+      {
+        "label": "Single - Small (7\")",
+        "price": 600
+      },
+      {
+        "label": "Single - Medium (10\")",
+        "price": 800
+      },
+      {
+        "label": "Single - Large (13\")",
+        "price": 1200
+      },
+      {
+        "label": "Double - Small (7\")",
+        "price": 1100
+      },
+      {
+        "label": "Double - Medium (10\")",
+        "price": 1500
+      },
+      {
+        "label": "Double - Large (13\")",
+        "price": 2300
+      }
+    ]
+  },
+  {
+    "category": "Yummy Pizza Flavours",
+    "name": "Chicken Malai Boti",
+    "nameUrdu": "چکن ملائی بوٹی",
+    "price": 600,
+    "priceVariants": [
+      {
+        "label": "Single - Small (7\")",
+        "price": 600
+      },
+      {
+        "label": "Single - Medium (10\")",
+        "price": 800
+      },
+      {
+        "label": "Single - Large (13\")",
+        "price": 1200
+      },
+      {
+        "label": "Double - Small (7\")",
+        "price": 1100
+      },
+      {
+        "label": "Double - Medium (10\")",
+        "price": 1500
+      },
+      {
+        "label": "Double - Large (13\")",
+        "price": 2300
+      }
+    ]
+  },
+  {
+    "category": "Yummy Pizza Flavours",
+    "name": "Eat Royal Kabab",
+    "nameUrdu": "ایٹ رائل کباب",
+    "price": 600,
+    "priceVariants": [
+      {
+        "label": "Single - Small (7\")",
+        "price": 600
+      },
+      {
+        "label": "Single - Medium (10\")",
+        "price": 800
+      },
+      {
+        "label": "Single - Large (13\")",
+        "price": 1200
+      },
+      {
+        "label": "Double - Small (7\")",
+        "price": 1100
+      },
+      {
+        "label": "Double - Medium (10\")",
+        "price": 1500
+      },
+      {
+        "label": "Double - Large (13\")",
+        "price": 2300
+      }
+    ]
+  },
+  {
+    "category": "Yummy Pizza Flavours",
+    "name": "Sekh Kabab",
+    "nameUrdu": "سیخ کباب",
+    "price": 600,
+    "priceVariants": [
+      {
+        "label": "Single - Small (7\")",
+        "price": 600
+      },
+      {
+        "label": "Single - Medium (10\")",
+        "price": 800
+      },
+      {
+        "label": "Single - Large (13\")",
+        "price": 1200
+      },
+      {
+        "label": "Double - Small (7\")",
+        "price": 1100
+      },
+      {
+        "label": "Double - Medium (10\")",
+        "price": 1500
+      },
+      {
+        "label": "Double - Large (13\")",
+        "price": 2300
+      }
+    ]
+  },
+  {
+    "category": "Yummy Pizza Flavours",
+    "name": "Eat Special",
+    "nameUrdu": "ایٹ اسپیشل",
+    "price": 600,
+    "priceVariants": [
+      {
+        "label": "Single - Small (7\")",
+        "price": 600
+      },
+      {
+        "label": "Single - Medium (10\")",
+        "price": 800
+      },
+      {
+        "label": "Single - Large (13\")",
+        "price": 1200
+      },
+      {
+        "label": "Double - Small (7\")",
+        "price": 1100
+      },
+      {
+        "label": "Double - Medium (10\")",
+        "price": 1500
+      },
+      {
+        "label": "Double - Large (13\")",
+        "price": 2300
+      }
+    ]
+  },
+  {
+    "category": "Yummy Pizza Flavours",
+    "name": "Eat Lazania",
+    "nameUrdu": "ایٹ لازانیا",
+    "price": 600,
+    "priceVariants": [
+      {
+        "label": "Single - Small (7\")",
+        "price": 600
+      },
+      {
+        "label": "Single - Medium (10\")",
+        "price": 800
+      },
+      {
+        "label": "Single - Large (13\")",
+        "price": 1200
+      },
+      {
+        "label": "Double - Small (7\")",
+        "price": 1100
+      },
+      {
+        "label": "Double - Medium (10\")",
+        "price": 1500
+      },
+      {
+        "label": "Double - Large (13\")",
+        "price": 2300
+      }
+    ]
+  },
+  {
+    "category": "Yummy Pizza Flavours",
+    "name": "Kalzon",
+    "nameUrdu": "کیلزون",
+    "price": 600,
+    "priceVariants": [
+      {
+        "label": "Single - Small (7\")",
+        "price": 600
+      },
+      {
+        "label": "Single - Medium (10\")",
+        "price": 800
+      },
+      {
+        "label": "Single - Large (13\")",
+        "price": 1200
+      },
+      {
+        "label": "Double - Small (7\")",
+        "price": 1100
+      },
+      {
+        "label": "Double - Medium (10\")",
+        "price": 1500
+      },
+      {
+        "label": "Double - Large (13\")",
+        "price": 2300
+      }
+    ]
+  },
+  {
+    "category": "Fried Chicken",
+    "name": "Fried Chicken",
+    "nameUrdu": "فرائیڈ چکن",
+    "price": 250,
+    "priceVariants": [
+      {
+        "label": "1 Piece",
+        "price": 250
+      },
+      {
+        "label": "2 Pieces",
+        "price": 440
+      },
+      {
+        "label": "3 Pieces",
+        "price": 660
+      },
+      {
+        "label": "4 Pieces",
+        "price": 880
+      }
+    ]
+  },
+  {
+    "category": "Nuggets",
+    "name": "Nuggets",
+    "nameUrdu": "نگٹس",
+    "price": 270,
+    "priceVariants": [
+      {
+        "label": "5 Pieces",
+        "price": 270
+      },
+      {
+        "label": "10 Pieces",
+        "price": 500
+      }
+    ]
+  },
+  {
+    "category": "Hot Wings",
+    "name": "Hot Wings",
+    "nameUrdu": "ہاٹ ونگز",
+    "price": 380,
+    "priceVariants": [
+      {
+        "label": "5 Pieces",
+        "price": 380
+      },
+      {
+        "label": "10 Pieces",
+        "price": 700
+      }
+    ]
+  },
+  {
+    "category": "Burgers",
+    "name": "Zinger Burger",
+    "nameUrdu": "زنگر برگر",
+    "price": 320
+  },
+  {
+    "category": "Burgers",
+    "name": "Patty Burger",
+    "nameUrdu": "پیٹی برگر",
+    "price": 250
+  },
+  {
+    "category": "Burgers",
+    "name": "Chicken Boti",
+    "nameUrdu": "چکن بوٹی",
+    "price": 340
+  },
+  {
+    "category": "Burgers",
+    "name": "Chief Burger",
+    "nameUrdu": "چیف برگر",
+    "price": 400
+  },
+  {
+    "category": "Burgers",
+    "name": "Tower Burger",
+    "nameUrdu": "ٹاور برگر",
+    "price": 500
+  },
+  {
+    "category": "Burgers",
+    "name": "Mighty Burger",
+    "nameUrdu": "مائٹی برگر",
+    "price": 580
+  },
+  {
+    "category": "Shawarma",
+    "name": "Chicken Shawarma",
+    "nameUrdu": "چکن شاورما",
+    "price": 250
+  },
+  {
+    "category": "Shawarma",
+    "name": "Chicken Cheese Shawarma",
+    "nameUrdu": "چکن چیز شاورما",
+    "price": 300
+  },
+  {
+    "category": "Shawarma",
+    "name": "Zinger Shawarma",
+    "nameUrdu": "زنگر شاورما",
+    "price": 350
+  },
+  {
+    "category": "Shawarma",
+    "name": "Zinger Cheese Shawarma",
+    "nameUrdu": "زنگر چیز شاورما",
+    "price": 400
+  },
+  {
+    "category": "Shawarma",
+    "name": "Platter Shawarma",
+    "nameUrdu": "پلیٹر شاورما",
+    "price": 600
+  },
+  {
+    "category": "Special Offer 4 in 1",
+    "name": "4 Chicken Shawarma",
+    "nameUrdu": "4 چکن شاورما",
+    "price": 900
+  },
+  {
+    "category": "Special Offer 4 in 1",
+    "name": "4 Zinger Burger",
+    "nameUrdu": "4 زنگر برگر",
+    "price": 1200
+  },
+  {
+    "category": "Special Offer 4 in 1",
+    "name": "4 Boti Burger",
+    "nameUrdu": "4 بوٹی برگر",
+    "price": 1260
+  },
+  {
+    "category": "Special Offer 4 in 1",
+    "name": "4 Chief Burger",
+    "nameUrdu": "4 چیف برگر",
+    "price": 1500
+  },
+  {
+    "category": "Tortilla Wraps",
+    "name": "Chicken Cheese Wrap",
+    "nameUrdu": "چکن چیز ریپ",
+    "price": 400
+  },
+  {
+    "category": "Tortilla Wraps",
+    "name": "Crispy Chicken Wrap",
+    "nameUrdu": "کرسپی چکن ریپ",
+    "price": 500
+  },
+  {
+    "category": "French Fries",
+    "name": "French Fries",
+    "nameUrdu": "فرنچ فرائز",
+    "price": 200,
+    "priceVariants": [
+      {
+        "label": "Regular",
+        "price": 200
+      },
+      {
+        "label": "Large",
+        "price": 300
+      },
+      {
+        "label": "Family",
+        "price": 400
+      }
+    ]
+  },
+  {
+    "category": "French Fries",
+    "name": "Creamy Loaded Fries",
+    "nameUrdu": "کریمی لوڈڈ فرائز",
+    "price": 500,
+    "priceVariants": [
+      {
+        "label": "Half",
+        "price": 500
+      },
+      {
+        "label": "Full",
+        "price": 700
+      }
+    ]
+  },
+  {
+    "category": "French Fries",
+    "name": "Crispy Loaded Fries",
+    "nameUrdu": "کرسپی لوڈڈ فرائز",
+    "price": 500,
+    "priceVariants": [
+      {
+        "label": "Half",
+        "price": 500
+      },
+      {
+        "label": "Full",
+        "price": 700
+      }
+    ]
+  },
+  {
+    "category": "Pasta",
+    "name": "Crunchy Chicken Pasta",
+    "nameUrdu": "کرنچی چکن پاستا",
+    "price": 500,
+    "priceVariants": [
+      {
+        "label": "Half",
+        "price": 500
+      },
+      {
+        "label": "Full",
+        "price": 700
+      }
+    ]
+  },
+  {
+    "category": "Pasta",
+    "name": "Creamy Pasta",
+    "nameUrdu": "کریمی پاستا",
+    "price": 500,
+    "priceVariants": [
+      {
+        "label": "Half",
+        "price": 500
+      },
+      {
+        "label": "Full",
+        "price": 700
+      }
+    ]
+  },
+  {
+    "category": "Beverages",
+    "name": "Soft Drink",
+    "nameUrdu": "سافٹ ڈرنک",
+    "price": 90,
+    "priceVariants": [
+      {
+        "label": "Regular",
+        "price": 90
+      },
+      {
+        "label": "500ml",
+        "price": 130
+      },
+      {
+        "label": "1.5 Litre",
+        "price": 240
+      }
+    ]
+  },
+  {
+    "category": "Beverages",
+    "name": "Water Bottle",
+    "nameUrdu": "پانی کی بوتل",
+    "price": 70,
+    "priceVariants": [
+      {
+        "label": "500ml",
+        "price": 70
+      },
+      {
+        "label": "1.5 Litre",
+        "price": 140
+      }
+    ]
+  },
+  {
+    "category": "Yummy Deal",
+    "name": "Chicken Doner",
+    "nameUrdu": "چکن ڈونر",
+    "price": 450,
+    "priceVariants": [
+      {
+        "label": "With 1 Regular Drink",
+        "price": 450
+      },
+      {
+        "label": "Doner Only",
+        "price": 380
+      }
+    ]
+  },
+  {
+    "category": "Yummy Deal",
+    "name": "Kids Meal",
+    "nameUrdu": "کڈز میل",
+    "price": 440,
+    "description": "5 Nuggets + Regular Fries + 1 Regular Drink"
+  },
+  {
+    "category": "Yummy Deal",
+    "name": "Chicken Club",
+    "nameUrdu": "چکن کلب",
+    "price": 450,
+    "priceVariants": [
+      {
+        "label": "Sandwich Only",
+        "price": 450
+      },
+      {
+        "label": "With Meal (Fries + Drink)",
+        "price": 650
+      }
+    ]
+  },
+  {
+    "category": "Yummy Deal",
+    "name": "Chicken Fajita",
+    "nameUrdu": "چکن فجیٹا",
+    "price": 400,
+    "priceVariants": [
+      {
+        "label": "Sandwich Only",
+        "price": 400
+      },
+      {
+        "label": "With Meal (Fries + Drink)",
+        "price": 600
+      }
+    ]
+  },
+  {
+    "category": "Yummy Deal",
+    "name": "Chicken Tikka",
+    "nameUrdu": "چکن تکہ",
+    "price": 400,
+    "priceVariants": [
+      {
+        "label": "Sandwich Only",
+        "price": 400
+      },
+      {
+        "label": "With Meal (Fries + Drink)",
+        "price": 600
+      }
+    ]
+  },
+  {
+    "category": "A1 Special Deal",
+    "name": "A1 Special Deal 1",
+    "nameUrdu": "اے ون اسپیشل ڈیل 1",
+    "price": 1650,
+    "description": "1 Crown Crust (M) + 1 Malai Boti (M) + 1 Drink (1.5L)"
+  },
+  {
+    "category": "A1 Special Deal",
+    "name": "A1 Special Deal 2",
+    "nameUrdu": "اے ون اسپیشل ڈیل 2",
+    "price": 1700,
+    "description": "1 Crown Crust (M) + 2 Zinger Burger + 1 Fries (R) + 1 Drink (1.5L)"
+  },
+  {
+    "category": "A1 Special Deal",
+    "name": "A1 Special Deal 3",
+    "nameUrdu": "اے ون اسپیشل ڈیل 3",
+    "price": 1800,
+    "description": "2 Zinger Burger + 2 Boti Burger + 2 Fries (R) + 1 Drink (1.5L)"
+  },
+  {
+    "category": "A1 Special Deal",
+    "name": "A1 Special Deal 4",
+    "nameUrdu": "اے ون اسپیشل ڈیل 4",
+    "price": 1900,
+    "description": "2 Chicken Shawarma + 3 Zinger Burger + 2 Fries (R) + 1 Drink (1.5L)"
+  },
+  {
+    "category": "A1 Special Deal",
+    "name": "A1 Special Deal 5",
+    "nameUrdu": "اے ون اسپیشل ڈیل 5",
+    "price": 1850,
+    "description": "1 Royal Kabab (M) + 2 Chicken Pieces + 2 Zinger Burger + 1 Drink (1.5L)"
+  },
+  {
+    "category": "A1 Special Deal",
+    "name": "A1 Special Deal 6",
+    "nameUrdu": "اے ون اسپیشل ڈیل 6",
+    "price": 2200,
+    "description": "1 Royal Kabab (M) + 1 Malai Boti (M) + 1 Fajita (M) + 1 Drink (1.5L)"
+  },
+  {
+    "category": "Student Deal",
+    "name": "Student Deal 1",
+    "nameUrdu": "اسٹوڈنٹ ڈیل 1",
+    "price": 470,
+    "description": "1 Zinger + 1 Fries (R) + 1 Drink (R)"
+  },
+  {
+    "category": "Student Deal",
+    "name": "Student Deal 2",
+    "nameUrdu": "اسٹوڈنٹ ڈیل 2",
+    "price": 900,
+    "description": "1 Zinger + 1 Pizza (S) + 1 Fries (R) + 1 Drink (500ml)"
+  },
+  {
+    "category": "Student Deal",
+    "name": "Student Deal 3",
+    "nameUrdu": "اسٹوڈنٹ ڈیل 3",
+    "price": 1250,
+    "description": "1 Zinger + 1 Pizza (S) + 2 Chicken Pieces + 1 Drink (500ml) + 1 Fries (R)"
+  },
+  {
+    "category": "Student Deal",
+    "name": "Student Deal 4",
+    "nameUrdu": "اسٹوڈنٹ ڈیل 4",
+    "price": 1900,
+    "description": "2 Zinger + 2 Pizza (S) + 1 Fries (R) + 1 Drink (1.5L) + 5 Hot Wings"
+  },
+  {
+    "category": "Crispy Deals",
+    "name": "Crispy Deal 1",
+    "nameUrdu": "کرسپی ڈیل 1",
+    "price": 1190,
+    "description": "2 Zinger + 5 Hot Wings + 1 Fries (R) + 1 Drink (Half)"
+  },
+  {
+    "category": "Crispy Deals",
+    "name": "Crispy Deal 2",
+    "nameUrdu": "کرسپی ڈیل 2",
+    "price": 1250,
+    "description": "1 Zinger + 1 Zinger Wrap + 5 Hot Wings + 1 Fries (R) + 1 Drink (Half)"
+  },
+  {
+    "category": "Crispy Deals",
+    "name": "Crispy Deal 3",
+    "nameUrdu": "کرسپی ڈیل 3",
+    "price": 1450,
+    "description": "1 Zinger + 2 Pizza (S) + 2 Chicken Pieces + 1 Fries (R) + 1 Drink (Half)"
+  },
+  {
+    "category": "Crispy Deals",
+    "name": "Crispy Deal 4",
+    "nameUrdu": "کرسپی ڈیل 4",
+    "price": 1590,
+    "description": "2 Pizza (S) + 5 Hot Wings + 1 Pasta (Half) + 1 Drink (Half)"
+  },
+  {
+    "category": "Crispy Deals",
+    "name": "Crispy Deal 5",
+    "nameUrdu": "کرسپی ڈیل 5",
+    "price": 1990,
+    "description": "1 Pizza (M) + 2 Zinger + 5 Hot Wings + 1 Fries (R) + 1 Drink (1.5L)"
+  },
+  {
+    "category": "Crispy Deals",
+    "name": "Crispy Deal 6",
+    "nameUrdu": "کرسپی ڈیل 6",
+    "price": 2490,
+    "description": "1 Pizza (M) + 1 Pizza (S) + 2 Zinger + 3 Chicken Pieces + 1 Fries (R) + 1 Drink (1.5L)"
+  },
+  {
+    "category": "Crispy Deals",
+    "name": "Crispy Deal 7",
+    "nameUrdu": "کرسپی ڈیل 7",
+    "price": 2690,
+    "description": "5 Chicken Pieces + 10 Hot Wings + 10 Nuggets + 1 Fries (L) + 1 Drink (1.5L)"
+  },
+  {
+    "category": "Crispy Deals",
+    "name": "Crispy Deal 8",
+    "nameUrdu": "کرسپی ڈیل 8",
+    "price": 3190,
+    "description": "1 Pizza (L) + 1 Pasta (L) + 2 Zinger + 3 Chicken Pieces + 1 Fries (L) + 1 Drink (1.5L)"
+  }
+]
