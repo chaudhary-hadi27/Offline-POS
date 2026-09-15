@@ -55,6 +55,9 @@ module.exports = Object.freeze({
   // Hidden Records (Ctrl+K -> "hide" -> gatekeeper): read-only view of
   // whatever a Danger Zone wipe has soft-deleted.
   ORDER_LIST_DELETED: 'order:list-deleted',
+  // Hidden Records -> History -> 3-dot menu -> Manage: permanent,
+  // irreversible SQL delete of orders that are already soft-deleted.
+  ORDER_HARD_DELETE: 'order:hard-delete',
 
   // Customers (secured)
   CUSTOMER_LIST: 'customer:list',

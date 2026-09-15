@@ -153,10 +153,33 @@ function addAddress(customerId, { label = null, address, isDefault = false }) {
  */
 const INACTIVE_WINDOW_DAYS = 30;
 
-function listCustomers({ search = null, cursor = null, limit = 30, filter = 'all' } = {}) {
+/**
+ * @param {object}  [opts]
+ * @param {boolean} [opts.lite]  Skip the per-customer order aggregates
+ *   (order_count / total_spent / last_order_at), which require a LEFT
+ *   JOIN + GROUP BY across the whole orders table. The New Order
+ *   cart's customer typeahead renders only a name and a phone number,
+ *   so on a restaurant with thousands of customers and tens of
+ *   thousands of orders it was paying for that aggregate on every
+ *   debounced keystroke and throwing the result away.
+ *
+ *   Addresses ARE still attached in lite mode - picking a result
+ *   auto-fills the delivery address from the customer's default one,
+ *   and those lookups are cheap (indexed, and capped by `limit`).
+ *
+ *   The `filter` options are aggregate-based, so they're ignored when
+ *   lite is set; it's only ever used for plain name/phone lookup.
+ */
+function listCustomers({ search = null, cursor = null, limit = 30, filter = 'all', lite = false } = {}) {
   const db = getDb();
   const params = { limit };
-  let sql = `
+  let sql = lite
+    ? `
+    SELECT c.*
+    FROM customers c
+    WHERE 1 = 1
+  `
+    : `
     SELECT c.*,
       COUNT(CASE WHEN o.status = 'COMPLETED' THEN o.id END) AS order_count,
       COALESCE(SUM(CASE WHEN o.status = 'COMPLETED' THEN o.total END), 0) AS total_spent,
@@ -188,8 +211,10 @@ function listCustomers({ search = null, cursor = null, limit = 30, filter = 'all
     sql += " AND c.created_at >= datetime('now', @newWindow)";
     params.newWindow = `-${INACTIVE_WINDOW_DAYS} days`;
   }
-  sql += ' GROUP BY c.id';
-  if (filter === 'regular') {
+  if (!lite) sql += ' GROUP BY c.id';
+  if (lite) {
+    // no aggregates to filter on - fall through to ORDER BY / LIMIT
+  } else if (filter === 'regular') {
     sql += ' HAVING order_count >= @regularMin';
     params.regularMin = REGULAR_MIN_ORDERS;
   } else if (filter === 'high_spender') {

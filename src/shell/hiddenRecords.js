@@ -27,6 +27,16 @@ import { renderAnalytics } from '../modules/analytics.js';
  * chart that wants real width - shrinking them into a small dialog
  * would just re-introduce the "not exact" layout problem this was
  * built to avoid.
+ *
+ * One deliberate difference from the live routes: the History tab is
+ * opened with `allowHardDelete: true`, which turns on a "Manage"
+ * entry (3-dot menu -> Manage) that lets an admin tick rows and
+ * permanently DELETE them - a real SQL delete, not another soft
+ * delete. It's scoped to this tab on purpose: everything listed here
+ * has already been through Danger Zone once, so there's no path from
+ * a live order straight to a hard delete. See allowHardDelete in
+ * src/modules/orderHistory.js and permanentlyDeleteOrders() in
+ * electron/database/repositories/orders.js.
  */
 export function createHiddenRecordsModal() {
   const overlay = document.createElement('div');
@@ -91,6 +101,23 @@ export function createHiddenRecordsModal() {
           title: 'Order History',
           emptyMessage: 'Nothing hidden here for this period.',
           fetchList: (opts) => posApi.orders.listDeleted(opts),
+          // Only enabled here, never on the live Order History route -
+          // everything this list shows has already been through Danger
+          // Zone's soft delete once, so "Manage" -> permanent delete is
+          // safe to offer.
+          allowHardDelete: true,
+          // The Reports tab is computed from these same rows, but it's
+          // mounted lazily and then cached for the lifetime of this
+          // popup (reportsBuilt). Without this invalidation, deleting
+          // records in History and switching to Reports would show
+          // totals that still counted the orders just destroyed -
+          // stale until the whole popup was closed and reopened.
+          // Tearing the mount down forces a fresh fetch on next view.
+          onRecordsDeleted: () => {
+            reportsMount.innerHTML = '';
+            reportsBuilt = false;
+            if (activeTab === 'reports') renderTabs();
+          },
         })
       );
     }

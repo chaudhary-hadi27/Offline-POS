@@ -306,6 +306,37 @@ function listDeletedOrders({ startDate = null, endDate = null, page = 1, pageSiz
   return { rows, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
 }
 
+/**
+ * Hidden Records "Manage" mode: a genuine, irreversible SQL DELETE -
+ * unlike deleteOrdersInRange() above, which only ever stamps
+ * deleted_at. This is the hard-delete step that comes AFTER that soft
+ * delete, not a replacement for it.
+ *
+ * Safety net: the WHERE clause only ever matches rows that are
+ * ALREADY soft-deleted (deleted_at IS NOT NULL). An id for a still-
+ * live order is silently skipped rather than deleted, so this can
+ * never become a backdoor for hard-deleting an active order - the
+ * only way into this function's blast radius is through Danger Zone
+ * first.
+ *
+ * order_items cascades automatically (ON DELETE CASCADE, see
+ * schema.sql), and nothing else in the schema references orders, so
+ * removing the order row is a complete, clean removal.
+ *
+ * @param {number[]} orderIds
+ */
+function permanentlyDeleteOrders(orderIds) {
+  const db = getDb();
+  const ids = Array.from(new Set((orderIds || []).map(Number))).filter((n) => Number.isInteger(n));
+  if (ids.length === 0) return { deleted: 0 };
+
+  const placeholders = ids.map(() => '?').join(', ');
+  const info = db
+    .prepare(`DELETE FROM orders WHERE deleted_at IS NOT NULL AND id IN (${placeholders})`)
+    .run(...ids);
+  return { deleted: info.changes };
+}
+
 module.exports = {
   createOrder,
   getOrderWithItems,
@@ -316,4 +347,5 @@ module.exports = {
   countOrdersInRange,
   deleteOrdersInRange,
   listDeletedOrders,
+  permanentlyDeleteOrders,
 };

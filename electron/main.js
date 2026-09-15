@@ -182,6 +182,7 @@ function registerIpcHandlers() {
   safeHandle(CH.ORDER_DANGER_COUNT, (opts) => ordersRepo.countOrdersInRange(opts));
   safeHandle(CH.ORDER_DANGER_DELETE, (opts) => ordersRepo.deleteOrdersInRange(opts));
   safeHandle(CH.ORDER_LIST_DELETED, (opts) => ordersRepo.listDeletedOrders(opts));
+  safeHandle(CH.ORDER_HARD_DELETE, (orderIds) => ordersRepo.permanentlyDeleteOrders(orderIds));
 
   // ---------- Customers (secured - renderer-side route guard still required) ----------
   safeHandle(CH.CUSTOMER_LIST, (opts) => customersRepo.listCustomers(opts));

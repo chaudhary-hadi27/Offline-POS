@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld('pos', {
     dangerCount: (opts) => invoke(CH.ORDER_DANGER_COUNT, opts),
     dangerDelete: (opts) => invoke(CH.ORDER_DANGER_DELETE, opts),
     listDeleted: (opts) => invoke(CH.ORDER_LIST_DELETED, opts),
+    hardDelete: (orderIds) => invoke(CH.ORDER_HARD_DELETE, orderIds),
   },
 
   customers: {

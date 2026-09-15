@@ -29,7 +29,7 @@ function fuzzyScore(query, target) {
 }
 
 function matchModule(query, mod) {
-  const haystacks = [mod.title, mod.subtitle, ...mod.paletteKeywords];
+  const haystacks = [mod.title, mod.subtitle, ...(mod.paletteKeywords || [])];
   const best = Math.max(...haystacks.map((h) => fuzzyScore(query, h)));
   return best;
 }
@@ -77,9 +77,21 @@ export function createCommandPalette({ onNavigate }) {
   const input = overlay.querySelector('#palette-input');
   const resultsEl = overlay.querySelector('#palette-results');
   const scrim = overlay.querySelector('.palette-scrim');
+  const card = overlay.querySelector('.modal-pop');
 
   let filtered = [];
   let selectedIndex = 0;
+  // True from the moment an arrow key moves the selection until the
+  // mouse is ACTUALLY moved again. Without this, arrowing past the
+  // last visible row calls scrollIntoView(), the list scrolls under a
+  // stationary cursor, and the browser fires a synthetic `mouseenter`
+  // on whichever row slid beneath the pointer - which immediately
+  // yanked selectedIndex back to the mouse position. The visible
+  // symptom was arrow keys "sticking" or jumping backwards as soon as
+  // the selection reached the bottom of the visible list. A real
+  // `mousemove` is the only thing that clears it, so hovering still
+  // works exactly as before the instant the user touches the mouse.
+  let keyboardNavigating = false;
 
   // Toggles only the highlight-related classes on an already-rendered
   // button, instead of tearing down and rebuilding the whole list.
@@ -141,6 +153,7 @@ export function createCommandPalette({ onNavigate }) {
     resultsEl.querySelectorAll('.palette-item').forEach((btn) => {
       btn.addEventListener('click', () => commit(Number(btn.dataset.index)));
       btn.addEventListener('mouseenter', () => {
+        if (keyboardNavigating) return; // synthetic hover from scrollIntoView, not a real hover
         selectedIndex = Number(btn.dataset.index);
         applyHighlight();
       });
@@ -161,6 +174,13 @@ export function createCommandPalette({ onNavigate }) {
     }
     selectedIndex = 0;
     renderResults();
+    // A brand-new result set always starts at the top. Without this,
+    // scrolling down a long list and then typing another character
+    // left the list scrolled where it was while the highlight reset
+    // to row 0 - so the selected row (and the best match) sat
+    // invisible above the fold, and Enter appeared to fire the wrong
+    // entry.
+    resultsEl.scrollTop = 0;
   }
 
   function commit(index) {
@@ -178,7 +198,16 @@ export function createCommandPalette({ onNavigate }) {
     overlay.classList.remove('hidden');
     overlay.classList.add('flex');
     input.value = '';
+    keyboardNavigating = false;
     updateFilter();
+    // The card is built once at startup and only toggled with
+    // `hidden` afterwards, so its CSS pop-in animation had already
+    // run (invisibly) at app launch and never played again. Removing
+    // and re-adding the class on a forced reflow replays it on every
+    // open, matching how every other modal in the app enters.
+    card.classList.remove('modal-pop');
+    void card.offsetWidth;
+    card.classList.add('modal-pop');
     input.focus();
     requestAnimationFrame(() => input.focus());
   }
@@ -190,6 +219,12 @@ export function createCommandPalette({ onNavigate }) {
 
   input.addEventListener('input', updateFilter);
   scrim.addEventListener('click', close);
+  // Only a genuine pointer movement hands control back to the mouse.
+  // `mousemove` never fires from programmatic scrolling, which is
+  // exactly what makes it a reliable signal here.
+  resultsEl.addEventListener('mousemove', () => {
+    keyboardNavigating = false;
+  });
 
   // Deliberately attached to `document`, not `overlay` or `input`.
   // open() moves focus into the input via requestAnimationFrame,
@@ -206,10 +241,14 @@ export function createCommandPalette({ onNavigate }) {
     if (!isOpen()) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
+      if (filtered.length === 0) return; // "No modules match that." - nothing to move through
+      keyboardNavigating = true;
       selectedIndex = Math.min(selectedIndex + 1, filtered.length - 1);
       applyHighlight();
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
+      if (filtered.length === 0) return;
+      keyboardNavigating = true;
       selectedIndex = Math.max(selectedIndex - 1, 0);
       applyHighlight();
     } else if (event.key === 'Enter') {

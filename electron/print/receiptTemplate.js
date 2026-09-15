@@ -184,6 +184,14 @@ function buildReceiptHtml(order, settings) {
   table { width: 100%; border-collapse: collapse; }
   td { padding: ${isHeavyBill ? '1px' : '2px'} 0; vertical-align: top; }
   td.qty { width: 26px; }
+  /* A menu item typed without spaces ("CHICKENBIRYANISPECIAL", a long
+     Urdu compound) sets a min-content width the table cannot shrink
+     below. Without this, that single word widens the whole table past
+     the body width and the amount column prints off the right edge of
+     the roll - worse on 58mm than 80mm, but reachable on both. Forcing
+     the name to break mid-word keeps every column inside the paper at
+     ANY roll width; the name simply wraps onto a second line instead. */
+  td.name { overflow-wrap: anywhere; word-break: break-word; }
   /* The 3mm right-padding is the "push the numbers back a bit" gutter
      - separate from the @page margin above, so the amount column
      never sits flush against the receipt's own right edge even

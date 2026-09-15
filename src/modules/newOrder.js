@@ -295,7 +295,10 @@ export function renderNewOrder() {
       searchDebounce = setTimeout(async () => {
         const requestId = ++searchRequestId;
         try {
-          const { rows } = await posApi.customers.list({ search: term, limit: 8 });
+          // `lite` skips the order-aggregate join and address lookups
+          // this dropdown never displays - keeps each keystroke cheap
+          // no matter how big the customer table gets.
+          const { rows } = await posApi.customers.list({ search: term, limit: 8, lite: true });
           if (requestId !== searchRequestId) return; // a newer keystroke's search already superseded this one
           if (rows.length === 0) {
             searchResults.classList.remove('hidden');
@@ -309,9 +312,9 @@ export function renderNewOrder() {
             .map(
               (c) => `
               <button type="button" data-customer-id="${c.id}"
-                class="customer-result-btn ripple-host flex flex-col items-start rounded-lg px-2.5 py-1.5 text-left text-xs hover:bg-accent/10">
-                <span class="font-medium text-ink">${c.name}</span>
-                <span class="text-ink-muted">${c.phone}</span>
+                class="customer-result-btn ripple-host flex w-full flex-shrink-0 flex-col items-start rounded-lg px-2.5 py-1.5 text-left text-xs hover:bg-accent/10">
+                <span class="w-full truncate font-medium leading-5 text-ink">${c.name}</span>
+                <span class="w-full truncate leading-5 text-ink-muted">${c.phone}</span>
               </button>`
             )
             .join('');
@@ -531,15 +534,21 @@ export function renderNewOrder() {
     const hasDescription = !!(item.description && item.description.trim());
 
     const overlay = document.createElement('div');
-    overlay.className = 'fixed inset-0 z-40 flex items-center justify-center p-4';
+    // overflow-y-auto on the overlay itself (not just the card's inner
+    // content) is what makes this work on short screens: if the card
+    // ever ends up taller than the viewport - a small landscape
+    // tablet, a resized desktop window, a phone - the whole overlay
+    // scrolls instead of clipping the top/bottom with no way to reach
+    // it. items-center still centers the card whenever it DOES fit.
+    overlay.className = 'fixed inset-0 z-40 flex items-center justify-center overflow-y-auto p-3 sm:p-4';
     overlay.innerHTML = `
       <div class="item-detail-scrim scrim-enter absolute inset-0 bg-black/60 backdrop-blur-md"></div>
-      <div class="modal-pop relative flex w-full max-w-sm flex-col rounded-2xl border border-border bg-surface shadow-modal">
-        <div class="relative overflow-hidden rounded-t-2xl">
+      <div class="modal-pop relative my-auto flex max-h-[calc(100vh-1.5rem)] w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-modal sm:max-h-[calc(100vh-2rem)]">
+        <div class="relative flex-shrink-0 overflow-hidden rounded-t-2xl">
           ${
             item.image_path
-              ? `<img data-image-path="${item.image_path}" alt="" class="aspect-square w-full object-cover opacity-0 transition-opacity duration-200 bg-surface-raised" />`
-              : `<div class="flex aspect-square w-full items-center justify-center bg-surface-raised text-ink-muted"><span class="h-8 w-8">${iconMarkup('utensils')}</span></div>`
+              ? `<img data-image-path="${item.image_path}" alt="" class="h-36 w-full object-cover opacity-0 transition-opacity duration-200 bg-surface-raised sm:h-44" />`
+              : `<div class="flex h-36 w-full items-center justify-center bg-surface-raised text-ink-muted sm:h-44"><span class="h-8 w-8">${iconMarkup('utensils')}</span></div>`
           }
         </div>
         <button type="button" id="item-detail-close" title="Close"
@@ -548,7 +557,7 @@ export function renderNewOrder() {
           <span class="h-4 w-4">${iconMarkup('close')}</span>
         </button>
 
-        <div class="flex max-h-[70vh] flex-col gap-4 overflow-y-auto p-5">
+        <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-5">
           <div>
             <p class="text-[11px] uppercase tracking-wide text-ink-muted">${item.category}</p>
             <h3 class="font-display text-lg font-bold text-ink">${item.name}</h3>

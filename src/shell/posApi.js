@@ -602,6 +602,21 @@ function createMock() {
           totalPages: Math.ceil(rows.length / pageSize),
         };
       },
+      /**
+       * Hidden Records -> History -> Manage (preview-mode twin of
+       * permanentlyDeleteOrders() in electron/database/repositories/orders.js):
+       * a real removal from state.orders, not another soft-delete
+       * stamp. Only ever removes ids that are already soft-deleted -
+       * mirrors the real repository's WHERE deleted_at IS NOT NULL
+       * guard, so this can't be used to hard-delete a live order here
+       * either.
+       */
+      async hardDelete(orderIds) {
+        const ids = new Set((orderIds || []).map(Number));
+        const before = state.orders.length;
+        state.orders = state.orders.filter((o) => !(ids.has(o.id) && o.deleted_at));
+        return { deleted: before - state.orders.length };
+      },
     },
 
     customers: {

@@ -36,9 +36,9 @@ export async function showReceiptPreview(orderId) {
           <span class="h-4 w-4">${iconMarkup('close')}</span>
         </button>
       </div>
-      <div class="flex-1 overflow-hidden bg-surface-raised p-3">
+      <div class="flex min-h-0 flex-1 overflow-auto bg-surface-raised p-3">
         <iframe id="receipt-preview-frame" title="Receipt preview" sandbox=""
-          class="h-full min-h-[50vh] w-full rounded-lg border border-border bg-white"></iframe>
+          class="h-full min-h-[280px] w-full rounded-lg border border-border bg-white"></iframe>
       </div>
       <div class="flex justify-end gap-2 border-t border-border px-4 py-3">
         <button type="button" id="receipt-preview-print" class="ripple-host rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-hover">
