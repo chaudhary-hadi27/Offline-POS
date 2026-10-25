@@ -199,6 +199,9 @@
    reserves space in the layout, expands with a smooth height+fade
    using a generous max-height ceiling (animating to a "real" height
    isn't possible in pure CSS since content is dynamic). */
+.settings-chevron { transition: transform 200ms var(--ease-ubuntu); }
+details[open] > summary .settings-chevron { transform: rotate(180deg); }
+
 .search-collapse {
   max-height: 0;
   opacity: 0;

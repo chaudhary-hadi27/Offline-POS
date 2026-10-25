@@ -13,6 +13,32 @@ function escapeHtml(str) {
   }[c]));
 }
 
+/**
+ * Settings > Printer > "Item names on receipt":
+ *   'urdu'    - Urdu name only (English only for items that have no Urdu name)
+ *   'english' - English name only
+ *   'both'    - English name, with the Urdu name on the line under it
+ * 'urdu' is the default because that is how receipts have always printed.
+ * The English name is always stored with the order (item_name_snapshot), so
+ * this is purely a print-time choice - old orders reprint in whatever
+ * language is selected now.
+ */
+const RECEIPT_LANGUAGES = ['urdu', 'english', 'both'];
+function receiptLanguage(settings) {
+  const v = String(settings?.receipt_language || '').toLowerCase();
+  return RECEIPT_LANGUAGES.includes(v) ? v : 'urdu';
+}
+
+/** The name cell's inner HTML for one line item, per the language mode. */
+function itemNameHtml(item, mode) {
+  const en = escapeHtml(item.item_name_snapshot);
+  const urName = item.item_name_urdu_snapshot && String(item.item_name_urdu_snapshot).trim();
+  const ur = urName ? escapeHtml(urName) : '';
+  if (mode === 'english' || !ur) return `<div class="en">${en}</div>`;
+  if (mode === 'urdu') return `<div class="ur">${ur}</div>`;
+  return `<div class="en">${en}</div><div class="ur">${ur}</div>`; // both
+}
+
 // A bill past this many line items switches to "compact" spacing
 // (tighter row/divider margins) below - a genuinely large order
 // (big dine-in tables, catering, bulk delivery) otherwise burns
@@ -94,7 +120,16 @@ function estimateReceiptHeightMm(order, settings) {
   if (hasCustomerBlock) {
     mm += 4 + customerLineCount * 5 + hrMm; // label + detail lines + trailing hr
   }
-  mm += Math.max(order.items.length, 1) * perItemMm; // one row per item (Urdu names print a touch taller)
+  // One row per item. Urdu rows print taller, and 'both' mode stacks an
+  // English line over the Urdu one.
+  const mode = receiptLanguage(settings);
+  if (order.items.length === 0) mm += perItemMm;
+  for (const item of order.items) {
+    const hasUrdu = !!(item.item_name_urdu_snapshot && String(item.item_name_urdu_snapshot).trim());
+    if (mode === 'english' || !hasUrdu) mm += perItemMm;
+    else if (mode === 'urdu') mm += perItemMm + 1.5;
+    else mm += perItemMm * 2 + 1;
+  }
   mm += hrMm; // hr after items
   mm += 5 + 5 + 8; // subtotal + tax + grand total (larger font, top border, extra padding)
   if (order.delivery_charge) mm += 5; // optional delivery charge row
@@ -120,17 +155,18 @@ function buildReceiptHtml(order, settings) {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  // The client only wants the Urdu name on the printed receipt - the
-  // English name is just a fallback for items that were never given
-  // an Urdu name (see item_name_urdu_snapshot / items.name_urdu).
+  // Item names follow Settings > Printer > "Item names on receipt"
+  // (see receiptLanguage() above). A row whose FIRST line is Urdu gets
+  // the `urdu-first` class so its qty/amount line up with that taller line.
+  const langMode = receiptLanguage(settings);
   const lineRows = order.items
     .map((item) => {
-      const displayName = item.item_name_urdu_snapshot || item.item_name_snapshot;
-      const isUrdu = !!item.item_name_urdu_snapshot;
+      const hasUrdu = !!(item.item_name_urdu_snapshot && String(item.item_name_urdu_snapshot).trim());
+      const urduFirst = langMode === 'urdu' && hasUrdu;
       return `
-      <tr>
+      <tr class="item${urduFirst ? ' urdu-first' : ''}">
         <td class="qty">${item.quantity}x</td>
-        <td class="name${isUrdu ? ' urdu' : ''}">${escapeHtml(displayName)}</td>
+        <td class="name">${itemNameHtml(item, langMode)}</td>
         <td class="amt">${money(item.total_price)}</td>
       </tr>`;
     })
@@ -183,7 +219,13 @@ function buildReceiptHtml(order, settings) {
   .meta-row > span:last-child { text-align: right; white-space: nowrap; }
   table { width: 100%; border-collapse: collapse; }
   td { padding: ${isHeavyBill ? '1px' : '2px'} 0; vertical-align: top; }
-  td.qty { width: 26px; }
+  /* The items table has fixed column widths (qty | name | amount), so a
+     long name can only wrap inside its own column - it can never push
+     the amount column around, and every row lines up with the next. */
+  table.items { table-layout: fixed; }
+  td.qty { width: 26px; white-space: nowrap; }
+  /* A line item is never split across a page break. */
+  tr.item { break-inside: avoid; page-break-inside: avoid; }
   /* A menu item typed without spaces ("CHICKENBIRYANISPECIAL", a long
      Urdu compound) sets a min-content width the table cannot shrink
      below. Without this, that single word widens the whole table past
@@ -197,16 +239,30 @@ function buildReceiptHtml(order, settings) {
      never sits flush against the receipt's own right edge even
      though it's still fully right-aligned within it. */
   td.amt { width: 76px; text-align: right; white-space: nowrap; padding-right: 3mm; }
+  .name .en { line-height: 1.35; }
   /* Urdu item names print right-to-left in the Nastaliq style if the
      printer's system has an Urdu font installed (e.g. "Jameel Noori
      Nastaleeq" or "Noto Nastaliq Urdu"), falling back to whatever
      generic sans-serif font can still render the Arabic script. */
-  td.name.urdu {
+  /* Nastaliq has tall ascenders/deep descenders - a looser line-height
+     keeps the dots and tails from colliding with the line above/below.
+     Urdu stays flush-left like the English line so both start at the
+     same edge. */
+  .name .ur {
     direction: rtl;
     text-align: left;
     unicode-bidi: plaintext;
     font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', 'Noto Naskh Arabic', Tahoma, sans-serif;
-    font-size: 14px;
+    font-size: ${langMode === 'both' ? '13px' : '14px'};
+    line-height: ${isHeavyBill ? '1.55' : '1.8'};
+  }
+  tr.urdu-first td.qty, tr.urdu-first td.amt { padding-top: ${isHeavyBill ? '3px' : '5px'}; }
+  ${
+    langMode === 'both'
+      ? `/* Two lines per item: a hairline between items keeps a long order readable. */
+  tr.item td { padding-top: ${isHeavyBill ? '3px' : '5px'}; padding-bottom: ${isHeavyBill ? '3px' : '5px'}; }
+  tr.item + tr.item td { border-top: 1px dotted #000; }`
+      : ''
   }
   .totals td { padding-top: 3px; }
   .totals td.label-cell { text-align: left; }
@@ -237,7 +293,7 @@ function buildReceiptHtml(order, settings) {
 
   ${customerBlock}
 
-  <table>${lineRows}</table>
+  <table class="items">${lineRows}</table>
   <div class="hr"></div>
 
   <table class="totals">
@@ -257,4 +313,4 @@ function buildReceiptHtml(order, settings) {
 </html>`;
 }
 
-module.exports = { buildReceiptHtml, money, formatDateTime, estimateReceiptHeightMm };
+module.exports = { buildReceiptHtml, money, formatDateTime, estimateReceiptHeightMm, receiptLanguage, RECEIPT_LANGUAGES };

@@ -148,7 +148,15 @@ function listOrdersByDateRange({ startDate, endDate, page = 1, pageSize = 25, se
   const offset = (page - 1) * pageSize;
   const params = { startDate, endDate, pageSize, offset };
 
-  let whereClause = 'WHERE deleted_at IS NULL AND created_at >= @startDate AND created_at <= @endDate';
+  // startDate/endDate arrive as naive LOCAL "YYYY-MM-DD HH:MM:SS" strings
+  // (see src/shell/businessDay.js formatLocal), but orders.created_at is
+  // stored in UTC (DEFAULT datetime('now')). datetime(x, 'utc') converts
+  // the local bound to UTC first - without it the comparison is off by
+  // the timezone offset (+5h in Pakistan), which is what split a business
+  // day at 8 PM instead of at the Settings day-start time.
+  let whereClause = `WHERE deleted_at IS NULL
+    AND created_at >= datetime(@startDate, 'utc')
+    AND created_at <= datetime(@endDate, 'utc')`;
   if (search) {
     whereClause += ` AND (
       CAST(id AS TEXT) LIKE @search
@@ -214,11 +222,11 @@ function dangerRangeWhereClause({ startDate = null, endDate = null } = {}) {
   // or re-stamps rows a previous Danger Zone action already hid.
   let whereClause = 'WHERE deleted_at IS NULL';
   if (startDate) {
-    whereClause += ' AND created_at >= @startDate';
+    whereClause += " AND created_at >= datetime(@startDate, 'utc')";
     params.startDate = startDate;
   }
   if (endDate) {
-    whereClause += ' AND created_at <= @endDate';
+    whereClause += " AND created_at <= datetime(@endDate, 'utc')";
     params.endDate = endDate;
   }
   return { whereClause, params };
@@ -261,31 +269,36 @@ function deleteOrdersInRange({ startDate = null, endDate = null } = {}) {
 }
 
 /**
- * Hidden Records view (Ctrl+K -> type "hide" -> gatekeeper): the
- * read-only mirror of Order History, but scoped to exactly the
- * opposite set of rows - orders a Danger Zone wipe has soft-deleted
- * (deleted_at IS NOT NULL) instead of the ones every other screen
- * shows (deleted_at IS NULL). Nothing here is restored or un-deleted;
- * this only lets an admin look at what a wipe hid, the same way
- * Order History lets them look at what's still active.
+ * Hidden Records view (Ctrl+K -> type "hide" -> gatekeeper). It shows
+ * EVERY order, not only the soft-deleted ones:
+ *   - live orders     (deleted_at IS NULL)     - still visible in the
+ *                                                normal Order History
+ *   - hidden orders   (deleted_at IS NOT NULL) - wiped from History &
+ *                                                Reports by Danger Zone
+ * `scope` narrows it: 'all' (default) | 'live' | 'deleted'. Each row
+ * carries deleted_at, so the UI can badge it Live / Hidden.
+ *
+ * Hidden Records is also the only place a HARD delete can be started
+ * (permanentlyDeleteOrders below) - it can remove either kind.
  *
  * `search` mirrors listOrdersByDateRange's matching (order #, customer
- * name, or customer phone). Date range is optional here - omitting
- * both means "every soft-deleted order, all time", which is the
- * natural default for a recycle-bin-style view.
+ * name, or customer phone). Date bounds are naive LOCAL strings, same
+ * as Order History, and are converted to UTC for the comparison.
  */
-function listDeletedOrders({ startDate = null, endDate = null, page = 1, pageSize = 25, search = null } = {}) {
+function listDeletedOrders({ startDate = null, endDate = null, page = 1, pageSize = 25, search = null, scope = 'all' } = {}) {
   const db = getDb();
   const offset = (page - 1) * pageSize;
   const params = { pageSize, offset };
 
-  let whereClause = 'WHERE deleted_at IS NOT NULL';
+  let whereClause = 'WHERE 1 = 1';
+  if (scope === 'live') whereClause += ' AND deleted_at IS NULL';
+  else if (scope === 'deleted') whereClause += ' AND deleted_at IS NOT NULL';
   if (startDate) {
-    whereClause += ' AND created_at >= @startDate';
+    whereClause += " AND created_at >= datetime(@startDate, 'utc')";
     params.startDate = startDate;
   }
   if (endDate) {
-    whereClause += ' AND created_at <= @endDate';
+    whereClause += " AND created_at <= datetime(@endDate, 'utc')";
     params.endDate = endDate;
   }
   if (search) {
@@ -297,8 +310,9 @@ function listDeletedOrders({ startDate = null, endDate = null, page = 1, pageSiz
     params.search = `%${search}%`;
   }
 
+  const orderBy = scope === 'deleted' ? 'deleted_at DESC, created_at DESC' : 'created_at DESC, id DESC';
   const rows = db
-    .prepare(`SELECT * FROM orders ${whereClause} ORDER BY deleted_at DESC, created_at DESC LIMIT @pageSize OFFSET @offset`)
+    .prepare(`SELECT * FROM orders ${whereClause} ORDER BY ${orderBy} LIMIT @pageSize OFFSET @offset`)
     .all(params);
 
   const { total } = db.prepare(`SELECT COUNT(*) AS total FROM orders ${whereClause}`).get(params);
@@ -307,21 +321,18 @@ function listDeletedOrders({ startDate = null, endDate = null, page = 1, pageSiz
 }
 
 /**
- * Hidden Records "Manage" mode: a genuine, irreversible SQL DELETE -
- * unlike deleteOrdersInRange() above, which only ever stamps
- * deleted_at. This is the hard-delete step that comes AFTER that soft
- * delete, not a replacement for it.
+ * Hidden Records "Manage" mode: a genuine, irreversible SQL DELETE.
  *
- * Safety net: the WHERE clause only ever matches rows that are
- * ALREADY soft-deleted (deleted_at IS NOT NULL). An id for a still-
- * live order is silently skipped rather than deleted, so this can
- * never become a backdoor for hard-deleting an active order - the
- * only way into this function's blast radius is through Danger Zone
- * first.
+ * Danger Zone only ever SOFT-deletes (deleted_at stamp). This is the
+ * only hard delete in the app, reachable only from Hidden Records
+ * (behind the gatekeeper password + a typed DELETE confirmation), and
+ * it removes whichever orders were ticked - live or already hidden.
  *
  * order_items cascades automatically (ON DELETE CASCADE, see
- * schema.sql), and nothing else in the schema references orders, so
- * removing the order row is a complete, clean removal.
+ * schema.sql) and nothing else references orders, so removing the
+ * order row is a complete, clean removal. Customer profiles are never
+ * touched. Note: removing a live order also removes it from its
+ * shift's sales total (shifts.js getShiftSalesTotal).
  *
  * @param {number[]} orderIds
  */
@@ -330,11 +341,18 @@ function permanentlyDeleteOrders(orderIds) {
   const ids = Array.from(new Set((orderIds || []).map(Number))).filter((n) => Number.isInteger(n));
   if (ids.length === 0) return { deleted: 0 };
 
-  const placeholders = ids.map(() => '?').join(', ');
-  const info = db
-    .prepare(`DELETE FROM orders WHERE deleted_at IS NOT NULL AND id IN (${placeholders})`)
-    .run(...ids);
-  return { deleted: info.changes };
+  // Chunked so a very large selection can't hit SQLite's bound-variable limit.
+  const CHUNK = 500;
+  const run = db.transaction(() => {
+    let deleted = 0;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const part = ids.slice(i, i + CHUNK);
+      const placeholders = part.map(() => '?').join(', ');
+      deleted += db.prepare(`DELETE FROM orders WHERE id IN (${placeholders})`).run(...part).changes;
+    }
+    return deleted;
+  });
+  return { deleted: run() };
 }
 
 module.exports = {

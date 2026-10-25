@@ -8,7 +8,9 @@ import { renderAnalytics } from '../modules/analytics.js';
 
 /**
  * The popup reached via Ctrl+K -> type "hide" -> Enter -> gatekeeper
- * password.
+ * password. It mirrors EVERY order - the live ones plus the ones Danger
+ * Zone has soft-deleted - with no labels or filters, and is the only place
+ * where records can be permanently (hard) deleted.
  *
  * This is NOT a simplified lookalike of Order History and Analytics &
  * Reports - it mounts the SAME two module functions the normal routes
@@ -43,6 +45,13 @@ export function createHiddenRecordsModal() {
   overlay.className = 'fixed inset-0 z-50 hidden flex-col bg-surface';
   overlay.innerHTML = `
     <header class="flex flex-wrap items-center gap-3 border-b border-border bg-surface px-6 py-3.5">
+      <!-- Close sits at the LEFT of the header, inside the POS, on purpose: the top-right
+           corner is where the Windows window controls are, and a close button there is
+           easy to mistake for (or mis-tap instead of) the app's own close. -->
+      <button type="button" class="hr-close ripple-host flex h-10 flex-shrink-0 items-center gap-2 rounded-xl bg-accent px-3.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-accent-hover" title="Close Hidden Records" aria-label="Close Hidden Records">
+        <span class="h-5 w-5">${iconMarkup('close')}</span>
+        <span>Close</span>
+      </button>
       <span class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent">
         <span class="h-5 w-5">${iconMarkup('lock')}</span>
       </span>
@@ -57,9 +66,6 @@ export function createHiddenRecordsModal() {
           <span class="inline-flex items-center gap-1.5"><span class="h-3.5 w-3.5">${iconMarkup('chart')}</span> Reports</span>
         </button>
       </div>
-      <button type="button" class="hr-close ripple-host ml-auto flex h-9 w-9 items-center justify-center rounded-lg text-ink-muted hover:bg-surface-raised hover:text-ink">
-        <span class="h-4 w-4">${iconMarkup('close')}</span>
-      </button>
     </header>
     <div id="hr-history-mount" class="flex flex-1 flex-col overflow-hidden"></div>
     <div id="hr-reports-mount" class="hidden flex-1 flex-col overflow-hidden"></div>
@@ -99,12 +105,12 @@ export function createHiddenRecordsModal() {
       historyMount.appendChild(
         renderOrderHistory({
           title: 'Order History',
-          emptyMessage: 'Nothing hidden here for this period.',
+          emptyMessage: 'No records for this period.',
           fetchList: (opts) => posApi.orders.listDeleted(opts),
-          // Only enabled here, never on the live Order History route -
-          // everything this list shows has already been through Danger
-          // Zone's soft delete once, so "Manage" -> permanent delete is
-          // safe to offer.
+          // Only enabled here, never on the live Order History route.
+          // "Manage" -> permanent delete works on any listed record
+          // (live or soft-deleted); it sits behind the gatekeeper
+          // password and a typed DELETE confirmation.
           allowHardDelete: true,
           // The Reports tab is computed from these same rows, but it's
           // mounted lazily and then cached for the lifetime of this
@@ -126,7 +132,7 @@ export function createHiddenRecordsModal() {
       reportsMount.appendChild(
         renderAnalytics({
           title: 'Analytics & Reports',
-          subtitle: 'Performance of orders removed via Danger Zone',
+          subtitle: 'All orders, including ones cleared from History',
           fetchSummary: (opts) => posApi.analytics.getDeletedSummary(opts),
         })
       );

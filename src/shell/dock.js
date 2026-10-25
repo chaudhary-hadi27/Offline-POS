@@ -14,9 +14,31 @@ export function createDock({ onNavigate }) {
     'dock relative flex h-full flex-shrink-0 flex-col items-center gap-1 overflow-hidden border-r border-border bg-surface-raised py-4';
   el.style.width = COLLAPSED_WIDTH;
 
+  // Page-name tooltip, shown only while the cursor is over an icon. It
+  // lives on <body> (not inside the dock) because the dock is
+  // overflow-hidden and would clip it.
+  const tip = document.createElement('div');
+  tip.className =
+    'pointer-events-none fixed z-[9999] hidden whitespace-nowrap rounded-lg bg-ink px-2.5 py-1.5 text-xs font-medium text-white shadow-modal';
+  document.body.appendChild(tip);
+  const hideTip = () => tip.classList.add('hidden');
+  function bindTip(btn, text) {
+    btn.setAttribute('aria-label', text);
+    btn.addEventListener('mouseenter', () => {
+      const r = btn.getBoundingClientRect();
+      tip.textContent = text;
+      tip.style.left = `${r.right + 10}px`;
+      tip.style.top = `${r.top + r.height / 2}px`;
+      tip.style.transform = 'translateY(-50%)';
+      tip.classList.remove('hidden');
+    });
+    btn.addEventListener('mouseleave', hideTip);
+    btn.addEventListener('click', hideTip);
+  }
+
   const homeBtn = document.createElement('button');
   homeBtn.type = 'button';
-  homeBtn.title = 'Dashboard';
+  bindTip(homeBtn, 'Dashboard');
   homeBtn.className =
     'ripple-host mb-3 flex h-11 w-11 items-center justify-center rounded-xl text-ink-secondary transition-colors hover:bg-accent/10 hover:text-accent';
   homeBtn.innerHTML = `<span class="h-5 w-5">${iconMarkup('home')}</span>`;
@@ -33,7 +55,7 @@ export function createDock({ onNavigate }) {
   MODULES.forEach((mod, index) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.title = mod.title;
+    bindTip(btn, mod.title);
     btn.dataset.dockModuleId = mod.id;
     btn.className =
       'dock-icon ripple-host relative mb-1 flex h-11 w-11 items-center justify-center rounded-xl text-ink-secondary transition-colors hover:bg-accent/10 hover:text-accent';
@@ -85,6 +107,7 @@ export function createDock({ onNavigate }) {
   function hide() {
     if (!visible) return;
     visible = false;
+    hideTip();
     el.style.width = COLLAPSED_WIDTH;
   }
 

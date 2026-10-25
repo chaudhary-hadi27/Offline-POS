@@ -5,7 +5,15 @@ import { iconMarkup } from '../shell/icons.js';
 import { attachRipple, attachRippleAll } from '../shell/ripple.js';
 import { toaster } from '../shell/toast.js';
 import { patternSvgMarkup, wirePatternEvents, PATTERN_MIN_LENGTH } from '../shell/patternLock.js';
-import { getBusinessDayStart, formatLocal } from '../shell/businessDay.js';
+import { getBusinessDayStart, formatLocal, businessRangeFromDates } from '../shell/businessDay.js';
+
+// Settings > Printer > Item names on receipt. Printing itself is handled in
+// electron/print/receiptTemplate.js (receiptLanguage()).
+const LANG_OPTIONS = [
+  { key: 'english', label: 'English', hint: 'Every item prints with its English name only.' },
+  { key: 'urdu', label: 'اردو', hint: 'Every item prints with its Urdu name only. Items without an Urdu name print in English.' },
+  { key: 'both', label: 'English + اردو', hint: 'English name with the Urdu name on the line below it. Items without an Urdu name print in English only.' },
+];
 
 function card(title, bodyHtml, icon) {
   return `
@@ -17,6 +25,17 @@ function card(title, bodyHtml, icon) {
       ${bodyHtml}
     </section>`;
 }
+
+// Settings tabs (top bar). Only the selected tab's section is shown.
+// Kept at module level so the page reopens on the tab you left it on.
+const TABS = [
+  { key: 'schedule', label: 'Business Day', icon: 'clock' },
+  { key: 'restaurant', label: 'Restaurant & Receipt', icon: 'settings' },
+  { key: 'printer', label: 'Printer', icon: 'print' },
+  { key: 'lock', label: 'Security Lock', icon: 'lock' },
+  { key: 'danger', label: 'Danger Zone', icon: 'alertTriangle', danger: true },
+];
+let activeTab = 'schedule';
 
 /** ON/OFF pill switch: green + knob right when on, red + knob left when off. */
 function toggleClasses(isOn) {
@@ -43,18 +62,52 @@ export function renderSettings() {
         <h1 class="font-display text-xl font-bold text-ink">Settings</h1>
         <p class="text-sm text-ink-secondary">Configuration</p>
       </header>
-      <div class="grid max-w-3xl grid-cols-1 gap-5">
-        <div id="schedule-card"></div>
-        <div id="info-card"></div>
-        <div id="lock-card"></div>
-        <div id="danger-card"></div>
+      <!-- No overflow-x here: with room to spare the tabs sit on one row, and on a narrow
+           screen they WRAP onto a second row instead of showing a sideways scrollbar. -->
+      <nav id="settings-tabs" class="mb-6 flex max-w-4xl flex-wrap gap-2" role="tablist" aria-label="Settings sections"></nav>
+      <div class="max-w-4xl">
+        <div id="schedule-card" data-panel="schedule" class="hidden"></div>
+        <div id="info-card" data-panel="restaurant" class="hidden"></div>
+        <div id="printer-card" data-panel="printer" class="hidden"></div>
+        <div id="lock-card" data-panel="lock" class="hidden"></div>
+        <div id="danger-card" data-panel="danger" class="hidden"></div>
       </div>
     `;
 
     renderScheduleCard(settings);
     renderInfoCard(settings);
+    renderPrinterCard(settings);
     renderLockCard(lockConfigured, lockType);
     renderDangerZoneCard(settings);
+    renderTabs();
+  }
+
+  function renderTabs() {
+    const tabsEl = root.querySelector('#settings-tabs');
+    tabsEl.innerHTML = TABS.map((t) => {
+      const on = t.key === activeTab;
+      const tone = on
+        ? t.danger
+          ? 'border-[#DC2626] bg-[#DC2626] text-white'
+          : 'border-accent bg-accent text-white'
+        : t.danger
+          ? 'border-border text-[#DC2626] hover:border-[#DC2626]/40'
+          : 'border-border text-ink-secondary hover:border-accent/30 hover:text-accent';
+      return `<button type="button" role="tab" aria-selected="${on}" data-tab="${t.key}"
+        class="settings-tab ripple-host flex items-center gap-2 whitespace-nowrap rounded-xl border px-3.5 py-2 text-sm font-medium transition-colors ${tone}">
+        <span class="h-4 w-4">${iconMarkup(t.icon)}</span>${t.label}
+      </button>`;
+    }).join('');
+    tabsEl.querySelectorAll('.settings-tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        activeTab = btn.dataset.tab;
+        renderTabs();
+      });
+    });
+    attachRippleAll(tabsEl, '.settings-tab');
+    root.querySelectorAll('[data-panel]').forEach((panel) => {
+      panel.classList.toggle('hidden', panel.dataset.panel !== activeTab);
+    });
   }
 
   // ---------------- Scheduled Business Hours (auto Day Start / Close) ----------------
@@ -63,9 +116,8 @@ export function renderSettings() {
     let isEnabled = settings.auto_day_start_enabled === '1';
 
     container.innerHTML = card(
-      'Scheduled Business Hours',
+      'Business Day',
       `
-      <p class="mb-4 text-sm text-ink-secondary">Decides what counts as "Today" in Order History, and automatically opens/closes the shift for the day - no manual register close needed.</p>
       <div class="mb-4 flex items-center gap-3">
         <button type="button" id="auto-start-toggle" class="${toggleClasses(isEnabled).track}">
           <span class="${toggleClasses(isEnabled).knob}"></span>
@@ -78,14 +130,9 @@ export function renderSettings() {
           <input type="time" name="day_start_time" value="${settings.day_start_time || '15:00'}"
             class="rounded-xl border border-border px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
         </label>
-        <label class="flex flex-col gap-1 text-xs text-ink-secondary">
-          Day ends at
-          <input type="time" name="day_end_time" value="${settings.day_end_time || '03:00'}"
-            class="rounded-xl border border-border px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
-        </label>
       </div>
       <button type="button" id="save-schedule-btn" class="ripple-host mt-4 rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-hover">
-        Save Schedule
+        Save
       </button>
       `,
       'clock'
@@ -106,19 +153,25 @@ export function renderSettings() {
     attachRipple(saveBtn);
     saveBtn.addEventListener('click', async () => {
       try {
+        const dayStart = container.querySelector('[name="day_start_time"]').value;
+        if (!dayStart) {
+          toaster.error('Pick the time your business day starts.');
+          return;
+        }
         await posApi.settings.set({
           auto_day_start_enabled: isEnabled ? '1' : '0',
-          day_start_time: container.querySelector('[name="day_start_time"]').value,
-          day_end_time: container.querySelector('[name="day_end_time"]').value,
+          day_start_time: dayStart,
         });
-        toaster.success('Schedule saved.');
+        // Danger Zone below shares this same settings object - keep it current.
+        settings.day_start_time = dayStart;
+        toaster.success('Business day saved.');
       } catch (err) {
         toaster.error(err.message);
       }
     });
   }
 
-  // ---------------- Restaurant info / tax / printer ----------------
+  // ---------------- Restaurant info / tax / delivery / receipt text ----------------
   function renderInfoCard(settings) {
     const container = root.querySelector('#info-card');
 
@@ -145,21 +198,6 @@ export function renderSettings() {
         ${field('restaurant_name', 'Restaurant name', settings.restaurant_name)}
         ${field('default_tax_rate', 'Default tax rate (%)', settings.default_tax_rate, 'number')}
         ${field('delivery_charge', 'Delivery charge (Rs.)', settings.delivery_charge, 'number')}
-        <div class="flex flex-col gap-1.5 text-sm sm:col-span-2">
-          <span class="font-medium text-ink-secondary">Windows printer</span>
-          <div class="flex gap-2">
-            <input name="printer_port" list="printer-suggestions" value="${settings.printer_port ?? ''}"
-              placeholder="Click Detect Printers, or type an exact printer name"
-              class="flex-1 rounded-xl border border-border px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
-            <button type="button" id="detect-printers-btn"
-              class="ripple-host whitespace-nowrap rounded-xl border border-border px-3.5 py-2.5 text-sm font-medium text-ink-secondary hover:border-accent/30 hover:text-accent">
-              Detect Printers
-            </button>
-          </div>
-          <datalist id="printer-suggestions"></datalist>
-          <span id="printer-detect-status" class="text-[11px] text-ink-muted"></span>
-        </div>
-        ${field('receipt_width_mm', 'Receipt width override (mm) - leave blank to auto-detect', settings.receipt_width_mm, 'text', 'Auto-detected from printer')}
         <label class="flex flex-col gap-1.5 text-sm sm:col-span-2">
           <span class="font-medium text-ink-secondary">Receipt header</span>
           <textarea name="receipt_header" rows="2" placeholder="e.g.&#10;123 Main Street, Lahore&#10;021-111222333"
@@ -178,6 +216,100 @@ export function renderSettings() {
 
     const form = container.querySelector('#info-form');
     attachRipple(form.querySelector('button[type="submit"]'));
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData(form).entries());
+      try {
+        await posApi.settings.set(data);
+        // Danger Zone / other cards share this settings object.
+        Object.assign(settings, data);
+        toaster.success('Settings saved.');
+      } catch (err) {
+        toaster.error(err.message);
+      }
+    });
+  }
+
+  // ---------------- Printer: receipt language, printer, width ----------------
+  function renderPrinterCard(settings) {
+    const container = root.querySelector('#printer-card');
+
+    function field(name, label, value, type = 'text', placeholder = '', full = false) {
+      // Number fields (tax rate, delivery charge) start at a real "0"
+      // default, not a placeholder - without select-on-focus, typing
+      // a new value just appends after that 0 (e.g. "0" -> "05") until
+      // the cashier manually deletes it first. Selecting the existing
+      // value on focus means the first keystroke replaces it outright,
+      // same as any POS numeric-entry field should behave.
+      const selectOnFocus = type === 'number' ? ' onfocus="this.select()"' : '';
+      return `
+        <label class="flex flex-col gap-1.5 text-sm ${full ? 'sm:col-span-2' : ''}">
+          <span class="font-medium text-ink-secondary">${label}</span>
+          <input name="${name}" type="${type}" value="${value ?? ''}" placeholder="${placeholder}"${selectOnFocus}
+            class="rounded-xl border border-border px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
+        </label>`;
+    }
+
+    container.innerHTML = card(
+      'Printer',
+      `
+      <form id="printer-form" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div class="flex flex-col gap-1.5 text-sm sm:col-span-2">
+          <span class="font-medium text-ink-secondary">Item names on receipt</span>
+          <input type="hidden" name="receipt_language" value="${LANG_OPTIONS.some((o) => o.key === settings.receipt_language) ? settings.receipt_language : 'urdu'}" />
+          <div id="receipt-lang-options" class="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Item names on receipt"></div>
+          <span id="receipt-lang-hint" class="text-[11px] text-ink-muted"></span>
+        </div>
+        <div class="flex flex-col gap-1.5 text-sm sm:col-span-2">
+          <span class="font-medium text-ink-secondary">Windows printer</span>
+          <div class="flex gap-2">
+            <input name="printer_port" list="printer-suggestions" value="${settings.printer_port ?? ''}"
+              placeholder="Click Detect Printers, or type an exact printer name"
+              class="flex-1 rounded-xl border border-border px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
+            <button type="button" id="detect-printers-btn"
+              class="ripple-host whitespace-nowrap rounded-xl border border-border px-3.5 py-2.5 text-sm font-medium text-ink-secondary hover:border-accent/30 hover:text-accent">
+              Detect Printers
+            </button>
+          </div>
+          <datalist id="printer-suggestions"></datalist>
+          <span id="printer-detect-status" class="text-[11px] text-ink-muted"></span>
+        </div>
+        ${field('receipt_width_mm', 'Receipt width override (mm) - leave blank to auto-detect', settings.receipt_width_mm, 'text', 'Auto-detected from printer', true)}
+        <div class="sm:col-span-2">
+          <button type="submit" class="ripple-host rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-hover">
+            Save printer settings
+          </button>
+        </div>
+      </form>
+      `,
+      'print'
+    );
+
+    const form = container.querySelector('#printer-form');
+    attachRipple(form.querySelector('button[type="submit"]'));
+
+    // Receipt language: three tappable options feeding the hidden input.
+    const langInput = form.querySelector('[name="receipt_language"]');
+    const langEl = form.querySelector('#receipt-lang-options');
+    const langHint = form.querySelector('#receipt-lang-hint');
+    function renderLangOptions() {
+      langEl.innerHTML = LANG_OPTIONS.map(
+        (o) => `<button type="button" role="radio" aria-checked="${o.key === langInput.value}" data-lang="${o.key}"
+          class="lang-opt ripple-host rounded-xl border px-2 py-2.5 text-sm font-medium transition-colors ${
+            o.key === langInput.value ? 'border-accent bg-accent/10 text-accent' : 'border-border text-ink-secondary hover:border-accent/30'
+          }">${o.label}</button>`
+      ).join('');
+      langEl.querySelectorAll('.lang-opt').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          langInput.value = btn.dataset.lang;
+          renderLangOptions();
+        });
+      });
+      attachRippleAll(langEl, '.lang-opt');
+      langHint.textContent = LANG_OPTIONS.find((o) => o.key === langInput.value)?.hint || '';
+    }
+    renderLangOptions();
 
     const detectBtn = form.querySelector('#detect-printers-btn');
     const printerInput = form.querySelector('[name="printer_port"]');
@@ -212,7 +344,8 @@ export function renderSettings() {
       const data = Object.fromEntries(new FormData(form).entries());
       try {
         await posApi.settings.set(data);
-        toaster.success('Settings saved.');
+        Object.assign(settings, data);
+        toaster.success('Printer settings saved.');
       } catch (err) {
         toaster.error(err.message);
       }
@@ -394,7 +527,8 @@ export function renderSettings() {
       const startInput = container.querySelector('#danger-range-start');
       const endInput = container.querySelector('#danger-range-end');
       if (!startInput || !endInput || !startInput.value || !endInput.value) return null;
-      return { startDate: `${startInput.value} 00:00:00`, endDate: `${endInput.value} 23:59:59` };
+      const range = businessRangeFromDates(startInput.value, endInput.value, settingsData.day_start_time);
+      return { startDate: formatLocal(range.start), endDate: formatLocal(range.end) };
     }
 
     function labelFor(key) {

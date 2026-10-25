@@ -15,7 +15,7 @@ database on the restaurant's own PC.
 - **WhatsApp Deals** — send deal broadcasts to customers straight from the app
 - **Business-day aware** — a configurable day-start time (not midnight) drives what counts as "today" across history and reports
 - **Secured admin area** — PIN / password / pattern lock with a security-question and master-key recovery path for lockouts
-- **Danger Zone + Hidden Records** — soft-delete old orders out of History & Reports, review what was removed, and permanently delete records when you're sure
+- **Danger Zone + Hidden Records** — soft-delete old orders out of History & Reports; Hidden Records shows live + hidden orders together and is where you permanently delete records when you're sure
 
 ## Tech stack
 

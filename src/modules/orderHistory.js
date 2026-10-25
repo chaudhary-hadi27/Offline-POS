@@ -6,7 +6,7 @@ import { attachRipple, attachRippleAll } from '../shell/ripple.js';
 import { toaster } from '../shell/toast.js';
 import { confirmAction } from '../shell/confirmDialog.js';
 import { printAndNotify } from './shared/printReceipt.js';
-import { getBusinessDayStart, formatLocal } from '../shell/businessDay.js';
+import { getBusinessDayStart, formatLocal, businessRangeFromDates, businessDateKey } from '../shell/businessDay.js';
 import { searchBarHtml, wireSearchBar } from '../shell/searchBar.js';
 
 function money(n) {
@@ -128,6 +128,9 @@ export function renderOrderHistory({
   let manageMode = false;
   let selectedIds = new Set();
   let lastRowIds = [];
+  // id -> true when that order is still live (not soft-deleted); used by the
+  // permanent-delete confirmation to say how many live orders are included.
+  const liveById = new Map();
 
   root.innerHTML = `
     <header class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-8 sm:py-5 md:px-12">
@@ -219,8 +222,17 @@ export function renderOrderHistory({
 
   const today = new Date();
   const weekAgo = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
-  rangeEndInput.value = today.toISOString().slice(0, 10);
-  rangeStartInput.value = weekAgo.toISOString().slice(0, 10);
+  // Local calendar dates - toISOString() would give the UTC date, which is
+  // yesterday's date for the first hours after midnight in Pakistan.
+  const localDate = (d) => formatLocal(d).slice(0, 10);
+  rangeEndInput.value = localDate(today);
+  rangeStartInput.value = localDate(weekAgo);
+  // Once settings load (below), re-point the pickers at today's BUSINESS date.
+  function syncRangeInputsToBusinessDay() {
+    const biz = new Date(`${businessDateKey(new Date(), settings.day_start_time)}T00:00:00`);
+    rangeEndInput.value = localDate(biz);
+    rangeStartInput.value = localDate(new Date(biz.getTime() - 6 * 24 * 60 * 60 * 1000));
+  }
 
   function renderChips() {
     chipsEl.innerHTML = PRESETS.map(
@@ -361,8 +373,11 @@ export function renderOrderHistory({
           toaster.error('Pick both a start and end date.');
           return;
         }
-        startDate = `${rangeStartInput.value} 00:00:00`;
-        endDate = `${rangeEndInput.value} 23:59:59`;
+        // Picked dates are BUSINESS days, not calendar days - e.g. with a
+        // 3 AM day start, "12 Oct" runs 12 Oct 3:00 AM -> 13 Oct 2:59 AM.
+        const range = businessRangeFromDates(rangeStartInput.value, rangeEndInput.value, settings.day_start_time);
+        startDate = formatLocal(range.start);
+        endDate = formatLocal(range.end);
       } else {
         const bounds = computeBounds(state.preset);
         startDate = formatLocal(bounds.start);
@@ -379,6 +394,7 @@ export function renderOrderHistory({
 
       subtitleEl.textContent = subtitleFor(state.preset);
       lastRowIds = result.rows.map((o) => o.id);
+      result.rows.forEach((o) => liveById.set(o.id, !o.deleted_at));
       const allSelectedOnPage = manageMode && lastRowIds.length > 0 && lastRowIds.every((id) => selectedIds.has(id));
       const rowsHtml = result.rows
         .map((order) => orderRow(order, { manageMode, selected: selectedIds.has(order.id) }))
@@ -506,11 +522,14 @@ export function renderOrderHistory({
     manageDeleteBtn.addEventListener('click', async () => {
       const ids = [...selectedIds];
       if (ids.length === 0) return;
+      const liveCount = ids.filter((id) => liveById.get(id)).length;
+      const liveNote =
+        liveCount > 0
+          ? ` ${liveCount} of them ${liveCount === 1 ? 'is a' : 'are'} LIVE order${liveCount === 1 ? '' : 's'} (still in Order History and Reports), so ${liveCount === 1 ? 'it' : 'they'} will disappear from there too.`
+          : '';
       const confirmed = await confirmAction({
         title: `Permanently delete ${ids.length} order${ids.length === 1 ? '' : 's'}?`,
-        message: `This removes ${ids.length === 1 ? 'it' : 'them'} and their line items from the database for good - it cannot be undone, and it's separate from the soft delete that put ${
-          ids.length === 1 ? 'it' : 'them'
-        } here. Customer profiles are never affected.`,
+        message: `This removes ${ids.length === 1 ? 'it' : 'them'} and their line items from the database for good - it cannot be undone.${liveNote} Customer profiles are never affected.`,
         confirmLabel: 'Delete permanently',
         tone: 'danger',
         requireTypedConfirmation: 'DELETE',
@@ -532,6 +551,7 @@ export function renderOrderHistory({
   (async () => {
     try {
       settings = await posApi.settings.getAll();
+      syncRangeInputsToBusinessDay();
     } catch (err) {
       console.error('[order-history] failed to load settings, defaulting day start to midnight', err);
     }

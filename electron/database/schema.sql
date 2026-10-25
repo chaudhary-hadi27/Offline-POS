@@ -177,6 +177,9 @@ INSERT OR IGNORE INTO app_settings (key, value) VALUES ('delivery_charge', '0');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('receipt_header', '');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('receipt_footer', 'Thank you for visiting!');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('printer_port', '');
+-- Item names on the printed receipt: 'urdu' (default, English only when an item has no
+-- Urdu name) | 'english' | 'both'. See electron/print/receiptTemplate.js.
+INSERT OR IGNORE INTO app_settings (key, value) VALUES ('receipt_language', 'urdu');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('theme_mode', 'light');
 -- Scheduled business hours: also decides what counts as "Today" in
 -- Order History (see src/shell/businessDay.js). New Order never
@@ -184,7 +187,6 @@ INSERT OR IGNORE INTO app_settings (key, value) VALUES ('theme_mode', 'light');
 -- which silently opens a shift behind the scenes if none is open.
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('auto_day_start_enabled', '0');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('day_start_time', '15:00');
-INSERT OR IGNORE INTO app_settings (key, value) VALUES ('day_end_time', '03:00');
 
 -- ---------- WHATSAPP DEAL SENDER: TEMPLATES ----------
 -- Lets a non-technical admin reuse a deal message/image instead of

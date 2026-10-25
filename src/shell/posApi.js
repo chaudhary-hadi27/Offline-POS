@@ -16,6 +16,16 @@
 
 import seedMenu from './seedMenu.json';
 
+// Preview-mode twin of the SQL business-day grouping in
+// electron/database/repositories/analytics.js: UTC timestamp -> local
+// time, minus the day-start offset, -> "YYYY-MM-DD".
+function mockBusinessDay(createdAtUtc, dayStartMinutes) {
+  const t = new Date(createdAtUtc.replace(' ', 'T') + 'Z').getTime() - (Number(dayStartMinutes) || 0) * 60000;
+  const d = new Date(t);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 const usingRealBridge = typeof window !== 'undefined' && !!window.pos;
 
 // Mirrors REGULAR_MIN_ORDERS / HIGH_SPENDER_MIN_TOTAL in
@@ -96,11 +106,15 @@ function mockCreateItem(state, mockImageStore, { sku, name, nameUrdu = null, cat
 function buildMockPreviewReceiptHtml(order, settings) {
   // Deliberately simplified duplicate of electron/print/receiptTemplate.js
   // for preview purposes only - the real Electron app never uses this.
+  const mode = ['urdu', 'english', 'both'].includes(settings.receipt_language) ? settings.receipt_language : 'urdu';
   const lines = order.items
     .map((i) => {
-      const displayName = i.item_name_urdu_snapshot || i.item_name_snapshot;
-      const dir = i.item_name_urdu_snapshot ? ' dir="rtl"' : '';
-      return `<span${dir}>${i.quantity}x ${displayName} — Rs. ${i.total_price.toFixed(2)}</span>`;
+      const ur = i.item_name_urdu_snapshot;
+      const en = i.item_name_snapshot;
+      const price = `Rs. ${i.total_price.toFixed(2)}`;
+      if (mode === 'english' || !ur) return `<span>${i.quantity}x ${en} — ${price}</span>`;
+      if (mode === 'urdu') return `<span dir="rtl">${i.quantity}x ${ur} — ${price}</span>`;
+      return `<span>${i.quantity}x ${en} — ${price}<br/><span dir="rtl">${ur}</span></span>`;
     })
     .join('<br/>');
   const customerBlock =
@@ -157,10 +171,10 @@ function createMock() {
       receipt_footer: 'Thank you for visiting!',
       receipt_width_mm: '80',
       printer_port: '',
+      receipt_language: 'urdu',
       theme_mode: 'light',
       auto_day_start_enabled: '0',
       day_start_time: '15:00',
-      day_end_time: '03:00',
     },
   };
 
@@ -574,16 +588,19 @@ function createMock() {
        * soft-deleted, newest deletion first. Date range is optional
        * here; omitting both returns every deleted order, all time.
        */
-      async listDeleted({ startDate = null, endDate = null, page = 1, pageSize = 25, search = null } = {}) {
+      async listDeleted({ startDate = null, endDate = null, page = 1, pageSize = 25, search = null, scope = 'all' } = {}) {
         const start = startDate ? new Date(startDate).getTime() : -Infinity;
         const end = endDate ? new Date(endDate).getTime() : Infinity;
         let rows = state.orders
           .filter((o) => {
-            if (!o.deleted_at) return false;
+            if (scope === 'live' && o.deleted_at) return false;
+            if (scope === 'deleted' && !o.deleted_at) return false;
             const t = new Date(o.created_at.replace(' ', 'T') + 'Z').getTime();
             return t >= start && t <= end;
           })
-          .sort((a, b) => (b.deleted_at || '').localeCompare(a.deleted_at || '') || b.id - a.id);
+          .sort((a, b) =>
+            scope === 'deleted' ? (b.deleted_at || '').localeCompare(a.deleted_at || '') || b.id - a.id : b.id - a.id
+          );
         if (search) {
           const q = search.toLowerCase();
           rows = rows.filter(
@@ -606,15 +623,12 @@ function createMock() {
        * Hidden Records -> History -> Manage (preview-mode twin of
        * permanentlyDeleteOrders() in electron/database/repositories/orders.js):
        * a real removal from state.orders, not another soft-delete
-       * stamp. Only ever removes ids that are already soft-deleted -
-       * mirrors the real repository's WHERE deleted_at IS NOT NULL
-       * guard, so this can't be used to hard-delete a live order here
-       * either.
+       * stamp. Removes any listed record, live or hidden.
        */
       async hardDelete(orderIds) {
         const ids = new Set((orderIds || []).map(Number));
         const before = state.orders.length;
-        state.orders = state.orders.filter((o) => !(ids.has(o.id) && o.deleted_at));
+        state.orders = state.orders.filter((o) => !ids.has(o.id));
         return { deleted: before - state.orders.length };
       },
     },
@@ -848,7 +862,7 @@ function createMock() {
     },
 
     analytics: {
-      async getSummary({ startDate, endDate }) {
+      async getSummary({ startDate, endDate, dayStartMinutes = 0 }) {
         const start = new Date(startDate).getTime();
         const end = new Date(endDate).getTime();
         const inRange = state.orders.filter((o) => {
@@ -863,7 +877,7 @@ function createMock() {
 
         const byDay = new Map();
         inRange.forEach((o) => {
-          const day = o.created_at.slice(0, 10);
+          const day = mockBusinessDay(o.created_at, dayStartMinutes);
           byDay.set(day, (byDay.get(day) || 0) + o.total);
         });
         const dailyBreakdown = [...byDay.entries()]
@@ -906,11 +920,13 @@ function createMock() {
        * instead of live ones. Omitting startDate/endDate covers every
        * deleted order, all time.
        */
-      async getDeletedSummary({ startDate = null, endDate = null } = {}) {
+      async getDeletedSummary({ startDate = null, endDate = null, scope = 'all', dayStartMinutes = 0 } = {}) {
         const start = startDate ? new Date(startDate).getTime() : -Infinity;
         const end = endDate ? new Date(endDate).getTime() : Infinity;
         const inRange = state.orders.filter((o) => {
-          if (!o.deleted_at) return false;
+          if (scope === 'live' && o.deleted_at) return false;
+          if (scope === 'deleted' && !o.deleted_at) return false;
+          if (o.status !== 'COMPLETED') return false;
           const t = new Date(o.created_at.replace(' ', 'T') + 'Z').getTime();
           return t >= start && t <= end;
         });
@@ -921,7 +937,7 @@ function createMock() {
 
         const byDay = new Map();
         inRange.forEach((o) => {
-          const day = o.created_at.slice(0, 10);
+          const day = mockBusinessDay(o.created_at, dayStartMinutes);
           byDay.set(day, (byDay.get(day) || 0) + o.total);
         });
         const dailyBreakdown = [...byDay.entries()]

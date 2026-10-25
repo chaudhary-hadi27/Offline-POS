@@ -4,26 +4,49 @@ import { posApi } from '../shell/posApi.js';
 import { iconMarkup } from '../shell/icons.js';
 import { attachRipple, attachRippleAll } from '../shell/ripple.js';
 import { toaster } from '../shell/toast.js';
+import {
+  toMinutes,
+  getBusinessDayStart,
+  toLocalDateKey,
+  businessDateKey,
+  businessRangeFromDates,
+} from '../shell/businessDay.js';
 
 function money(n) {
   return `Rs. ${Number(n).toFixed(2)}`;
 }
 
-function toDateInputValue(d) {
-  return d.toISOString().slice(0, 10);
+/**
+ * Date-picker value for a range edge: the BUSINESS day (see
+ * src/shell/businessDay.js) the instant belongs to - not the UTC date
+ * toISOString() would give, which is off by a day for hours after local
+ * midnight in Pakistan.
+ */
+function toDateInputValue(d, dayStartTime) {
+  return businessDateKey(d, dayStartTime);
 }
 
-function presetRange(preset) {
+/**
+ * Presets are BUSINESS-day based. With a 3 AM day start, "Today" is
+ * today's 3:00 AM through tomorrow's 2:59:59 AM, and an order placed at
+ * 1 AM still counts toward the previous business day.
+ */
+function presetRange(preset, dayStartTime) {
   const now = new Date();
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+  const startMin = toMinutes(dayStartTime || '00:00');
+  const dayStart = getBusinessDayStart(now, dayStartTime);
+  const at = (y, m, d) => new Date(y, m, d, Math.floor(startMin / 60), startMin % 60, 0, 0);
+  const y = dayStart.getFullYear();
+  const m = dayStart.getMonth();
+  const d = dayStart.getDate();
+  const end = new Date(at(y, m, d + 1).getTime() - 1000); // last second of the current business day
   let start;
   if (preset === 'today') {
-    start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    start = dayStart;
   } else if (preset === 'week') {
-    const dayOfWeek = now.getDay(); // 0 = Sunday
-    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek, 0, 0, 0);
+    start = at(y, m, d - dayStart.getDay()); // week starts Sunday
   } else {
-    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+    start = at(y, m, 1);
   }
   return { start, end };
 }
@@ -40,7 +63,7 @@ function metricCard(label, value, icon) {
 }
 
 function toDayKey(d) {
-  return d.toISOString().slice(0, 10);
+  return toLocalDateKey(d);
 }
 
 /**
@@ -53,11 +76,14 @@ function toDayKey(d) {
  * [start, end] with 0 where the backend didn't return one, so the
  * chart's width always reflects the real time span.
  */
-function zeroFillDays(dailyBreakdown, start, end) {
+function zeroFillDays(dailyBreakdown, start, end, dayStartTime) {
   const byDay = new Map(dailyBreakdown.map((d) => [d.day, d.total]));
   const days = [];
-  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  // Walk BUSINESS days (the backend groups by the same rule).
+  const first = getBusinessDayStart(start, dayStartTime);
+  const lastDay = getBusinessDayStart(end, dayStartTime);
+  const cursor = new Date(first.getFullYear(), first.getMonth(), first.getDate());
+  const last = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate());
   while (cursor <= last) {
     const key = toDayKey(cursor);
     days.push({ day: key, total: byDay.get(key) || 0 });
@@ -111,6 +137,7 @@ export function renderAnalytics({
   root.className = 'flex h-full w-full flex-col overflow-hidden bg-surface';
 
   let activePreset = 'today';
+  let dayStartTime = '00:00'; // replaced by Settings > Business Day once loaded
 
   root.innerHTML = `
     <header class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-8 py-5 md:px-12">
@@ -170,9 +197,9 @@ export function renderAnalytics({
     presetButtonsEl.querySelectorAll('.preset-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         activePreset = btn.dataset.preset;
-        const { start, end } = presetRange(activePreset);
-        startInput.value = toDateInputValue(start);
-        endInput.value = toDateInputValue(end);
+        const { start, end } = presetRange(activePreset, dayStartTime);
+        startInput.value = toDateInputValue(start, dayStartTime);
+        endInput.value = toDateInputValue(end, dayStartTime);
         renderPresetButtons();
         load(start, end);
       });
@@ -183,7 +210,12 @@ export function renderAnalytics({
   root.querySelector('#apply-range-btn').addEventListener('click', () => {
     activePreset = null;
     renderPresetButtons();
-    load(new Date(`${startInput.value}T00:00:00`), new Date(`${endInput.value}T23:59:59`));
+    if (!startInput.value || !endInput.value) {
+      toaster.error('Pick both a start and end date.');
+      return;
+    }
+    const { start, end } = businessRangeFromDates(startInput.value, endInput.value, dayStartTime);
+    load(start, end);
   });
   attachRipple(root.querySelector('#apply-range-btn'));
 
@@ -237,15 +269,17 @@ export function renderAnalytics({
   }
 
   async function load(start, end) {
-    startInput.value = toDateInputValue(start);
-    endInput.value = toDateInputValue(end);
+    startInput.value = toDateInputValue(start, dayStartTime);
+    endInput.value = toDateInputValue(end, dayStartTime);
     try {
       const summary = await fetchSummary({
         startDate: start.toISOString().slice(0, 19).replace('T', ' '),
         endDate: end.toISOString().slice(0, 19).replace('T', ' '),
+        // The backend groups the daily chart into business days using this.
+        dayStartMinutes: toMinutes(dayStartTime),
       });
       renderMetrics(summary);
-      const filledDays = zeroFillDays(summary.dailyBreakdown, start, end);
+      const filledDays = zeroFillDays(summary.dailyBreakdown, start, end, dayStartTime);
       root.querySelector('#chart-host').innerHTML = barChart(filledDays);
       renderTopItems(summary.topItems);
       renderOrderTypes(summary.orderTypeBreakdown);
@@ -255,8 +289,16 @@ export function renderAnalytics({
   }
 
   renderPresetButtons();
-  const { start, end } = presetRange('today');
-  load(start, end);
+  (async () => {
+    try {
+      const settings = await posApi.settings.getAll();
+      dayStartTime = settings.day_start_time || '00:00';
+    } catch (err) {
+      console.error('[analytics] failed to load settings, grouping by midnight', err);
+    }
+    const { start, end } = presetRange('today', dayStartTime);
+    load(start, end);
+  })();
 
   return root;
 }

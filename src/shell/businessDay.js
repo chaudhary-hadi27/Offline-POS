@@ -2,10 +2,13 @@
 
 /**
  * Shared "business day" math. A restaurant's day doesn't reset at
- * midnight - it resets whenever Settings > Scheduled Business Hours
- * says it does (e.g. 3:00 PM). This is used both by the auto shift
- * scheduler (src/shell/shiftScheduler.js) and by Order History's
- * "Today" filter, so the two never disagree about what "today" means.
+ * midnight - it resets whenever Settings > Business Day says it does
+ * (e.g. 3:00 AM). There is only a START time: a business day runs from
+ * that time until the same time the next day (3 AM -> 3 AM), so there is
+ * never a gap and never an overlap. Everything that groups or filters by
+ * day uses these helpers - Order History, Hidden Records, Reports &
+ * Analytics, Danger Zone and the auto shift scheduler - so they can never
+ * disagree about what "today" means.
  */
 
 export function toMinutes(hhmm) {
@@ -42,4 +45,30 @@ export function getBusinessDayStart(now, dayStartTime) {
 export function formatLocal(d) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/** Local calendar date of a Date as "YYYY-MM-DD" (NOT the UTC date toISOString() gives). */
+export function toLocalDateKey(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** The business day an instant belongs to, as "YYYY-MM-DD" (the date the day STARTED on). */
+export function businessDateKey(d, dayStartTime) {
+  return toLocalDateKey(getBusinessDayStart(d, dayStartTime));
+}
+
+/**
+ * Turns two date-picker values ("YYYY-MM-DD") into the exact business-day
+ * range they cover: start date at the day-start time, through the moment
+ * just before the day after the end date starts. With a 3 AM day start,
+ * 10 Oct -> 12 Oct is 10 Oct 03:00:00 -> 13 Oct 02:59:59.
+ */
+export function businessRangeFromDates(startDateStr, endDateStr, dayStartTime) {
+  const startMin = toMinutes(dayStartTime || '00:00');
+  const at = (str, addDays) => {
+    const [y, m, d] = str.split('-').map(Number);
+    return new Date(y, m - 1, d + addDays, Math.floor(startMin / 60), startMin % 60, 0, 0);
+  };
+  return { start: at(startDateStr, 0), end: new Date(at(endDateStr, 1).getTime() - 1000) };
 }

@@ -9,9 +9,15 @@ const { getDb } = require('../db');
  * this repository exists specifically to keep that boundary honest:
  * it CANNOT return a raw order or item row, only pre-aggregated numbers.
  */
-function getSummary({ startDate, endDate }) {
+// SQL expression that turns a UTC created_at into its BUSINESS day
+// ("YYYY-MM-DD" of the day it started on): shift to local time, then back
+// by the day-start offset, so with a 3 AM day start a 1 AM order still
+// belongs to the previous business day.
+const BUSINESS_DAY_SQL = `date(created_at, 'localtime', '-' || @dayStartMinutes || ' minutes')`;
+
+function getSummary({ startDate, endDate, dayStartMinutes = 0 }) {
   const db = getDb();
-  const params = { startDate, endDate };
+  const params = { startDate, endDate, dayStartMinutes: Number(dayStartMinutes) || 0 };
 
   const totals = db
     .prepare(
@@ -27,7 +33,7 @@ function getSummary({ startDate, endDate }) {
 
   const dailyBreakdown = db
     .prepare(
-      `SELECT date(created_at) AS day, SUM(total) AS total
+      `SELECT ${BUSINESS_DAY_SQL} AS day, SUM(total) AS total
        FROM orders
        WHERE deleted_at IS NULL AND status = 'COMPLETED' AND created_at >= @startDate AND created_at <= @endDate
        GROUP BY day
@@ -71,12 +77,15 @@ function getSummary({ startDate, endDate }) {
 
 /**
  * Reports half of the Hidden Records view - the same shape as
- * getSummary() above, but aggregated over soft-deleted orders
- * (deleted_at IS NOT NULL) instead of live ones. Omitting startDate/
- * endDate covers every deleted order ever, which is the sensible
- * default for a "what did Danger Zone hide" report.
+ * getSummary() above, but with a `scope`:
+ *   'all' (default) - live + hidden orders together
+ *   'live'          - deleted_at IS NULL
+ *   'deleted'       - deleted_at IS NOT NULL (what Danger Zone hid)
+ * Only COMPLETED orders count, same as the live Reports. Omitting
+ * startDate/endDate covers all time. Dates are passed through exactly
+ * as the Reports screen sends them (UTC), so no conversion here.
  */
-function getDeletedSummary({ startDate = null, endDate = null } = {}) {
+function getDeletedSummary({ startDate = null, endDate = null, scope = 'all', dayStartMinutes = 0 } = {}) {
   const db = getDb();
   const params = {};
   let dateClause = '';
@@ -88,6 +97,13 @@ function getDeletedSummary({ startDate = null, endDate = null } = {}) {
     dateClause += ' AND created_at <= @endDate';
     params.endDate = endDate;
   }
+  const scopeClause =
+    scope === 'live' ? 'deleted_at IS NULL' : scope === 'deleted' ? 'deleted_at IS NOT NULL' : '1 = 1';
+  const where = `WHERE ${scopeClause} AND status = 'COMPLETED'${dateClause}`;
+  const whereJoined = where
+    .replaceAll('deleted_at', 'o.deleted_at')
+    .replaceAll('status', 'o.status')
+    .replaceAll('created_at', 'o.created_at');
 
   const totals = db
     .prepare(
@@ -97,19 +113,19 @@ function getDeletedSummary({ startDate = null, endDate = null } = {}) {
          COALESCE(SUM(subtotal), 0)   AS net_sales,
          COUNT(*)                     AS order_count
        FROM orders
-       WHERE deleted_at IS NOT NULL${dateClause}`
+       ${where}`
     )
     .get(params);
 
   const dailyBreakdown = db
     .prepare(
-      `SELECT date(created_at) AS day, SUM(total) AS total
+      `SELECT ${BUSINESS_DAY_SQL} AS day, SUM(total) AS total
        FROM orders
-       WHERE deleted_at IS NOT NULL${dateClause}
+       ${where}
        GROUP BY day
        ORDER BY day ASC`
     )
-    .all(params);
+    .all({ ...params, dayStartMinutes: Number(dayStartMinutes) || 0 });
 
   const topItems = db
     .prepare(
@@ -118,7 +134,7 @@ function getDeletedSummary({ startDate = null, endDate = null } = {}) {
               SUM(oi.total_price)   AS revenue
        FROM order_items oi
        JOIN orders o ON o.id = oi.order_id
-       WHERE o.deleted_at IS NOT NULL${dateClause.replaceAll('created_at', 'o.created_at')}
+       ${whereJoined}
        GROUP BY oi.item_name_snapshot
        ORDER BY revenue DESC
        LIMIT 10`
@@ -129,7 +145,7 @@ function getDeletedSummary({ startDate = null, endDate = null } = {}) {
     .prepare(
       `SELECT order_type, COUNT(*) AS count, COALESCE(SUM(total), 0) AS total
        FROM orders
-       WHERE deleted_at IS NOT NULL${dateClause}
+       ${where}
        GROUP BY order_type`
     )
     .all(params);
