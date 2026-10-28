@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -21,7 +21,8 @@ if (app.isPackaged) {
 }
 
 const CH = require('./ipc-channels');
-const { initDatabase, closeDatabase } = require('./database/db');
+const { initDatabase, getDb, closeDatabase } = require('./database/db');
+const { createBackupManager } = require('./backup/backupService');
 const { seedMenuIfEmpty, backfillMissingUrduNames } = require('./database/seedItems');
 
 // Repositories - the ONLY place in the app that touches SQL.
@@ -55,6 +56,7 @@ if (!gotLock) {
 let mainWindow = null;
 let machineId = null;
 let userDataDir = null;
+let backupManager = null;
 
 // The window/taskbar icon while the app is running. Drop your logo at
 // build/icon.png (see build/README.md) - this picks it up automatically,
@@ -291,6 +293,30 @@ function registerIpcHandlers() {
     return true;
   });
 
+  // ---------- Backup / restore ----------
+  safeHandle(CH.BACKUP_GET_STATUS, () => backupManager.getStatus());
+  safeHandle(CH.BACKUP_RUN_NOW, () => backupManager.runNow());
+  safeHandle(CH.BACKUP_PICK_EXTERNAL, async () => {
+    const res = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose a folder on a USB drive or another disk',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (res.canceled || res.filePaths.length === 0) return backupManager.getStatus();
+    return backupManager.setExternalDir(res.filePaths[0]);
+  });
+  safeHandle(CH.BACKUP_CLEAR_EXTERNAL, () => backupManager.clearExternalDir());
+  safeHandle(CH.BACKUP_LIST, (locationId) => backupManager.list(locationId));
+  safeHandle(CH.BACKUP_RESTORE, async (locationId, fileName) => {
+    const result = await backupManager.restore(locationId, fileName);
+    // The database file was swapped underneath the running app, so the
+    // only safe next step is a clean restart (it re-runs migrations too).
+    setTimeout(() => {
+      app.relaunch();
+      app.exit(0);
+    }, 1200);
+    return result;
+  });
+
   // Generic relative-path -> data URL resolver (works for both
   // item-images/ and deal-images/ since it just joins userDataDir).
   safeHandle(CH.WHATSAPP_IMAGE_GET, (relativePath) => getItemImageDataUrl(userDataDir, relativePath));
@@ -302,6 +328,27 @@ app.whenReady().then(() => {
   seedMenuIfEmpty(itemsRepo);
   backfillMissingUrduNames(itemsRepo);
   machineId = getOrCreateMachineId(userDataDir);
+
+  // Automatic offline backup: runs shortly after the POS starts (when
+  // the last good backup is older than 12h) and re-checks hourly. See
+  // electron/backup/backupService.js for the design.
+  let defaultBackupParent;
+  try {
+    defaultBackupParent = app.getPath('documents');
+  } catch {
+    defaultBackupParent = userDataDir;
+  }
+  backupManager = createBackupManager({
+    getDb,
+    userDataDir,
+    defaultLocalDir: defaultBackupParent,
+    appVersion: app.getVersion(),
+    closeDb: closeDatabase,
+    reopenDb: () => initDatabase(userDataDir),
+    log: (msg, err) => console.error(msg, err || ''),
+  });
+  backupManager.start();
+
   registerIpcHandlers();
   createWindow();
 
@@ -334,6 +381,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  if (backupManager) backupManager.stop();
   closeDatabase();
   whatsappService.stopCampaign();
   whatsappService.flushCampaignState();

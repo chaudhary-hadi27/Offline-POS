@@ -173,7 +173,6 @@ function createMock() {
       printer_port: '',
       receipt_language: 'urdu',
       theme_mode: 'light',
-      auto_day_start_enabled: '0',
       day_start_time: '15:00',
     },
   };
@@ -987,6 +986,67 @@ function createMock() {
      * delay, which looked indistinguishable from a real working
      * connection and caused real confusion. Better to fail honestly.
      */
+    // Browser-preview stand-in for the automatic offline backup (the real
+    // thing is electron/backup/backupService.js). Just enough state to
+    // click through the Backup screen.
+    backup: (() => {
+      const mem = { external: null, snaps: { local: [], external: [] }, lastSuccessAt: null };
+      const fakeSnap = () => ({
+        name: `POS-DB_${nowIso().slice(0, 10)}_${nowIso().slice(11, 19).replace(/:/g, '')}.sqlite`,
+        createdAt: nowIso(),
+        orders: state.orders.length,
+        items: state.items.length,
+        customers: state.customers.length,
+        sizeBytes: 180000 + state.orders.length * 900,
+        appVersion: '1.0.0',
+      });
+      const status = () => ({
+        running: false,
+        externalDir: mem.external,
+        lastSuccessAt: mem.lastSuccessAt,
+        lastAttemptAt: mem.lastSuccessAt,
+        lastError: null,
+        intervalHours: 12,
+        warnings: [],
+        advice: mem.external ? [] : ['Backups are only on this PC right now. Choose a USB / second-drive folder so they also survive a dead hard disk.'],
+        destinations: [
+          { id: 'local', label: 'This PC', root: 'C:\\Users\\You\\Documents\\POS-Backups', available: true, count: mem.snaps.local.length, latest: mem.snaps.local[0] || null, lastSuccessAt: mem.lastSuccessAt, lastError: null },
+          ...(mem.external
+            ? [{ id: 'external', label: 'External drive / folder', root: `${mem.external}\\POS-Backups`, available: true, count: mem.snaps.external.length, latest: mem.snaps.external[0] || null, lastSuccessAt: mem.lastSuccessAt, lastError: null }]
+            : []),
+        ],
+      });
+      return {
+        async getStatus() {
+          return status();
+        },
+        async runNow() {
+          const snap = fakeSnap();
+          mem.snaps.local.unshift(snap);
+          if (mem.external) mem.snaps.external.unshift(snap);
+          mem.lastSuccessAt = nowIso();
+          return { ok: true, name: snap.name, results: [{ id: 'local', ok: true }] };
+        },
+        async pickExternalFolder() {
+          mem.external = 'E:\\Backup';
+          return status();
+        },
+        async clearExternalFolder() {
+          mem.external = null;
+          mem.snaps.external = [];
+          return status();
+        },
+        async list(id) {
+          return mem.snaps[id] || [];
+        },
+        async restore(id, fileName) {
+          const s = (mem.snaps[id] || []).find((x) => x.name === fileName);
+          if (!s) throw new Error('That backup file no longer exists.');
+          return { restored: true, from: fileName, orders: s.orders, items: s.items, customers: s.customers };
+        },
+      };
+    })(),
+
     whatsapp: (() => {
       let listeners = [];
       const notify = (payload) => listeners.forEach((fn) => fn(payload));

@@ -7,20 +7,13 @@
  * that time until the same time the next day (3 AM -> 3 AM), so there is
  * never a gap and never an overlap. Everything that groups or filters by
  * day uses these helpers - Order History, Hidden Records, Reports &
- * Analytics, Danger Zone and the auto shift scheduler - so they can never
- * disagree about what "today" means.
+ * Analytics and Danger Zone - so they can never disagree about what
+ * "today" means.
  */
 
 export function toMinutes(hhmm) {
   const [h, m] = String(hhmm || '0:0').split(':').map(Number);
   return h * 60 + m;
-}
-
-/** Handles the overnight-wrap case (e.g. 15:00 -> 03:00 spans midnight). */
-export function isWithinWindow(nowMin, startMin, endMin) {
-  if (startMin === endMin) return true;
-  if (startMin < endMin) return nowMin >= startMin && nowMin < endMin;
-  return nowMin >= startMin || nowMin < endMin;
 }
 
 /**

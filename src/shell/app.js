@@ -5,9 +5,9 @@ import { createCommandPalette, HIDDEN_RECORDS_MODULE_ID } from './commandPalette
 import { createShortcutBar, createShortcutSheet } from './shortcutBar.js';
 import { createGatekeeper } from './gatekeeper.js';
 import { createHiddenRecordsModal } from './hiddenRecords.js';
-import { initShiftScheduler } from './shiftScheduler.js';
 import { shellStore } from './state.js';
 import { posApi } from './posApi.js';
+import { toaster } from './toast.js';
 
 async function applyPersistedTheme() {
   try {
@@ -105,5 +105,26 @@ export function mountApp(root) {
   });
 
   applyPersistedTheme();
-  initShiftScheduler();
+  watchBackupHealth();
+}
+
+/**
+ * Backups run on their own (electron/backup/backupService.js); this just
+ * makes sure someone NOTICES if they stop working - e.g. the USB drive
+ * was unplugged, or no backup has succeeded for 2+ days. Checked a minute
+ * after start (so the startup backup has had its chance) and every 6 hours.
+ */
+function watchBackupHealth() {
+  const check = async () => {
+    try {
+      const status = await posApi.backup.getStatus();
+      if (status.warnings.length > 0) {
+        toaster.error(`Backup problem: ${status.warnings[0]} Open Settings > Backup & Restore.`, { duration: 12000 });
+      }
+    } catch (err) {
+      console.error('[app] backup health check failed', err);
+    }
+  };
+  setTimeout(check, 60000);
+  setInterval(check, 6 * 60 * 60 * 1000);
 }

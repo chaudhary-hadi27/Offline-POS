@@ -78,13 +78,13 @@ function closeShift(shiftId, { closingCash }) {
 }
 
 /**
- * Automatic "day rollover" close - run by the shift scheduler
- * (src/shell/shiftScheduler.js) the moment a new business day begins
- * and the previous shift was left open (there is no manual Close
- * Register step anymore). No one physically counted the drawer at
- * this point, so closing_cash/variance are left NULL instead of
- * guessing a number - a NULL variance reads as "not counted", which
- * is honest, instead of a fabricated "exact match".
+ * Automatic "day rollover" close for a shift left open from a previous
+ * day (there is no manual Close Register step, and nothing in the app
+ * calls this on a timer anymore - day-based views follow the Business
+ * Day setting, not shifts). No one physically counted the drawer, so
+ * closing_cash/variance are left NULL instead of guessing a number - a
+ * NULL variance reads as "not counted", which is honest, instead of a
+ * fabricated "exact match".
  */
 function autoCloseShift(shiftId) {
   const db = getDb();

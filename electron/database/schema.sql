@@ -185,7 +185,6 @@ INSERT OR IGNORE INTO app_settings (key, value) VALUES ('theme_mode', 'light');
 -- Order History (see src/shell/businessDay.js). New Order never
 -- blocks on this - see electron/database/repositories/orders.js,
 -- which silently opens a shift behind the scenes if none is open.
-INSERT OR IGNORE INTO app_settings (key, value) VALUES ('auto_day_start_enabled', '0');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('day_start_time', '15:00');
 
 -- ---------- WHATSAPP DEAL SENDER: TEMPLATES ----------

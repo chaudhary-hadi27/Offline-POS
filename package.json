@@ -16,7 +16,8 @@
     "master-key": "node scripts/compute-master-key.js",
     "db:test": "node electron/database/__selftest__.js",
     "db:test:extended": "node electron/database/__selftest_extended__.js",
-    "db:test:all": "npm run db:test && npm run db:test:extended"
+    "db:test:backup": "node electron/backup/__selftest_backup__.js",
+    "db:test:all": "npm run db:test && npm run db:test:extended && npm run db:test:backup"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",

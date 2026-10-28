@@ -6,6 +6,7 @@ import { attachRipple, attachRippleAll } from '../shell/ripple.js';
 import { toaster } from '../shell/toast.js';
 import { patternSvgMarkup, wirePatternEvents, PATTERN_MIN_LENGTH } from '../shell/patternLock.js';
 import { getBusinessDayStart, formatLocal, businessRangeFromDates } from '../shell/businessDay.js';
+import { createBackupPanel, relativeTime } from '../shell/backupPanel.js';
 
 // Settings > Printer > Item names on receipt. Printing itself is handled in
 // electron/print/receiptTemplate.js (receiptLanguage()).
@@ -36,6 +37,7 @@ const TABS = [
   { key: 'danger', label: 'Danger Zone', icon: 'alertTriangle', danger: true },
 ];
 let activeTab = 'schedule';
+let backupPanel = null; // created on first use, then reused
 
 /** ON/OFF pill switch: green + knob right when on, red + knob left when off. */
 function toggleClasses(isOn) {
@@ -72,6 +74,20 @@ export function renderSettings() {
         <div id="lock-card" data-panel="lock" class="hidden"></div>
         <div id="danger-card" data-panel="danger" class="hidden"></div>
       </div>
+      <!-- Backup lives at the very end of the page (under every tab), not as a tab. -->
+      <div class="mt-10 max-w-4xl border-t border-border pt-6">
+        <button type="button" id="open-backup-btn"
+          class="ripple-host flex w-full items-center gap-4 rounded-2xl border border-border bg-surface px-5 py-4 text-left transition-colors hover:border-accent/30">
+          <span class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent">
+            <span class="h-5 w-5">${iconMarkup('database')}</span>
+          </span>
+          <span class="flex-1">
+            <span class="block font-display text-sm font-bold text-ink">Backup &amp; Restore</span>
+            <span id="backup-btn-sub" class="block text-xs text-ink-secondary">Automatic offline backups of all your data</span>
+          </span>
+          <span class="h-4 w-4 text-ink-muted">${iconMarkup('chevronRight')}</span>
+        </button>
+      </div>
     `;
 
     renderScheduleCard(settings);
@@ -80,6 +96,30 @@ export function renderSettings() {
     renderLockCard(lockConfigured, lockType);
     renderDangerZoneCard(settings);
     renderTabs();
+    wireBackupButton();
+  }
+
+  function wireBackupButton() {
+    const btn = root.querySelector('#open-backup-btn');
+    attachRipple(btn);
+    btn.addEventListener('click', () => {
+      if (!backupPanel) backupPanel = createBackupPanel();
+      backupPanel.open();
+    });
+    // Show the last backup time right on the button; a problem turns it red.
+    posApi.backup
+      .getStatus()
+      .then((s) => {
+        const sub = root.querySelector('#backup-btn-sub');
+        if (!sub) return;
+        if (s.warnings.length > 0) {
+          sub.textContent = s.warnings[0];
+          sub.className = 'block text-xs text-red-600';
+        } else {
+          sub.textContent = `Last backup: ${relativeTime(s.lastSuccessAt)}`;
+        }
+      })
+      .catch(() => {});
   }
 
   function renderTabs() {
@@ -110,20 +150,13 @@ export function renderSettings() {
     });
   }
 
-  // ---------------- Scheduled Business Hours (auto Day Start / Close) ----------------
+  // ---------------- Business Day (one start time drives every day-based view) ----------------
   function renderScheduleCard(settings) {
     const container = root.querySelector('#schedule-card');
-    let isEnabled = settings.auto_day_start_enabled === '1';
 
     container.innerHTML = card(
       'Business Day',
       `
-      <div class="mb-4 flex items-center gap-3">
-        <button type="button" id="auto-start-toggle" class="${toggleClasses(isEnabled).track}">
-          <span class="${toggleClasses(isEnabled).knob}"></span>
-        </button>
-        <span id="auto-start-label" class="text-sm text-ink-secondary">${isEnabled ? 'Auto Day Start is on' : 'Auto Day Start is off'}</span>
-      </div>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label class="flex flex-col gap-1 text-xs text-ink-secondary">
           Day starts at
@@ -138,17 +171,6 @@ export function renderSettings() {
       'clock'
     );
 
-    const toggleBtn = container.querySelector('#auto-start-toggle');
-    const toggleLabel = container.querySelector('#auto-start-label');
-    attachRipple(toggleBtn);
-    toggleBtn.addEventListener('click', () => {
-      isEnabled = !isEnabled;
-      const t = toggleClasses(isEnabled);
-      toggleBtn.className = t.track;
-      toggleBtn.querySelector('span').className = t.knob;
-      toggleLabel.textContent = isEnabled ? 'Auto Day Start is on' : 'Auto Day Start is off';
-    });
-
     const saveBtn = container.querySelector('#save-schedule-btn');
     attachRipple(saveBtn);
     saveBtn.addEventListener('click', async () => {
@@ -158,11 +180,8 @@ export function renderSettings() {
           toaster.error('Pick the time your business day starts.');
           return;
         }
-        await posApi.settings.set({
-          auto_day_start_enabled: isEnabled ? '1' : '0',
-          day_start_time: dayStart,
-        });
-        // Danger Zone below shares this same settings object - keep it current.
+        await posApi.settings.set({ day_start_time: dayStart });
+        // Danger Zone shares this same settings object - keep it current.
         settings.day_start_time = dayStart;
         toaster.success('Business day saved.');
       } catch (err) {

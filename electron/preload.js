@@ -142,6 +142,15 @@ contextBridge.exposeInMainWorld('pos', {
     },
   },
 
+  backup: {
+    getStatus: () => invoke(CH.BACKUP_GET_STATUS),
+    runNow: () => invoke(CH.BACKUP_RUN_NOW),
+    pickExternalFolder: () => invoke(CH.BACKUP_PICK_EXTERNAL),
+    clearExternalFolder: () => invoke(CH.BACKUP_CLEAR_EXTERNAL),
+    list: (locationId) => invoke(CH.BACKUP_LIST, locationId),
+    restore: (locationId, fileName) => invoke(CH.BACKUP_RESTORE, locationId, fileName),
+  },
+
   whatsapp: {
     init: () => invoke(CH.WHATSAPP_INIT),
     getStatus: () => invoke(CH.WHATSAPP_GET_STATUS),

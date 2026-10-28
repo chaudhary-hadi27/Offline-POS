@@ -111,6 +111,11 @@ export const icons = {
     <circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none" />
     <circle cx="12" cy="19" r="1.1" fill="currentColor" stroke="none" />
   `),
+  database: base(`
+    <ellipse cx="12" cy="6" rx="7.5" ry="2.8" />
+    <path d="M4.5 6v6c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8V6" />
+    <path d="M4.5 12v6c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8v-6" />
+  `),
   trash: base(`
     <path d="M4 7h16" />
     <path d="M9 7V4.5h6V7" />
