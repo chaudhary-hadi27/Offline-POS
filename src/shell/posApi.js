@@ -989,6 +989,30 @@ function createMock() {
     // Browser-preview stand-in for the automatic offline backup (the real
     // thing is electron/backup/backupService.js). Just enough state to
     // click through the Backup screen.
+    // Browser preview has no real license (it only exists inside the Electron app).
+    license: {
+      async getStatus() {
+        return {
+          state: 'active',
+          locked: false,
+          plan: 'DEV',
+          planLabel: 'Browser preview (no license check)',
+          customer: null,
+          issuedAt: null,
+          expiresAt: null,
+          daysLeft: null,
+          expiringSoon: false,
+          hardwareId: 'PREV-IEWW-0000-0000',
+          hardwareIdSource: 'file',
+          clockWarning: null,
+          message: 'Browser preview - there is no license check here.',
+        };
+      },
+      async activate() {
+        throw new Error('License activation only works in the installed POS app.');
+      },
+    },
+
     backup: (() => {
       const mem = { external: null, snaps: { local: [], external: [] }, lastSuccessAt: null };
       const fakeSnap = () => ({

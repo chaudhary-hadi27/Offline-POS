@@ -8,6 +8,8 @@ import { createHiddenRecordsModal } from './hiddenRecords.js';
 import { shellStore } from './state.js';
 import { posApi } from './posApi.js';
 import { toaster } from './toast.js';
+import { refreshLicense, isLocked, createLicenseBanner } from './license.js';
+import { createTopBar } from './topBar.js';
 
 async function applyPersistedTheme() {
   try {
@@ -37,6 +39,10 @@ export function mountApp(root) {
   const palette = createCommandPalette({
     onNavigate: async (id) => {
       if (id === HIDDEN_RECORDS_MODULE_ID) {
+        if (isLocked()) {
+          toaster.error('The POS is locked. Enter your license key in Settings > License.');
+          return;
+        }
         const granted = await gatekeeper.requireAccess();
         if (granted) hiddenRecords.open();
         return;
@@ -48,11 +54,15 @@ export function mountApp(root) {
   const router = createRouter({
     onRequestPalette: () => palette.open(),
     requireAccess: gatekeeper.requireAccess,
+    isLocked,
   });
+  const licenseBanner = createLicenseBanner({ onOpen: () => router.navigate('settings') });
   const shortcutBar = createShortcutBar({
     onRequestOpen: () => sheet.open(shellStore.get().route),
   });
 
+  shell.appendChild(createTopBar().el);
+  shell.appendChild(licenseBanner.el);
   shell.appendChild(router.el);
   shell.appendChild(shortcutBar.el);
   root.appendChild(shell);
@@ -106,6 +116,29 @@ export function mountApp(root) {
 
   applyPersistedTheme();
   watchBackupHealth();
+  watchLicense(() => router.navigate('settings'));
+}
+
+/**
+ * Reads the license at start-up (and every 5 minutes), sends a locked POS
+ * straight to Settings > License, and warns once when a license is about to
+ * run out. Enforcement itself lives in the main process.
+ */
+function watchLicense(openSettings) {
+  let warnedExpiry = false;
+  let wasLocked = false;
+  const check = async () => {
+    const s = await refreshLicense();
+    if (!s) return;
+    if (s.locked && !wasLocked) openSettings();
+    wasLocked = s.locked;
+    if (s.expiringSoon && !warnedExpiry) {
+      warnedExpiry = true;
+      toaster.error(s.message, { duration: 12000 });
+    }
+  };
+  check();
+  setInterval(check, 5 * 60 * 1000);
 }
 
 /**

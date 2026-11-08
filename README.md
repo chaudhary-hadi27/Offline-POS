@@ -16,6 +16,7 @@ database on the restaurant's own PC.
 - **Business-day aware** — a configurable day-start time (not midnight) drives what counts as "today" across history and reports
 - **Secured admin area** — PIN / password / pattern lock with a security-question and master-key recovery path for lockouts
 - **Automatic offline backup** — runs by itself when the POS starts (and every 12h while open): verified database snapshots + an incremental image mirror, kept on this PC and optionally on a USB / second-disk folder, with automatic retention and one-click restore (Settings → Backup & Restore)
+- **Licensing** — offline, tied to the PC (Windows MachineGuid), signed with your private key (Ed25519), trial / yearly / multi-year plans, clock-rollback protection, and a locked mode where only Settings + Backup work. See [docs/LICENSING_GUIDE.md](docs/LICENSING_GUIDE.md)
 - **Danger Zone + Hidden Records** — soft-delete old orders out of History & Reports; Hidden Records shows live + hidden orders together and is where you permanently delete records when you're sure
 
 ## Tech stack
@@ -62,6 +63,7 @@ The installer is written to `release/`.
 npm run db:test          # core repository self-test, no Electron needed
 npm run db:test:extended # extended coverage
 npm run db:test:backup   # automatic backup/restore against a real SQLite database
+npm run db:test:license  # licensing: signatures, plans, clock guard, repair codes, lock rules
 ```
 
 ## Project structure

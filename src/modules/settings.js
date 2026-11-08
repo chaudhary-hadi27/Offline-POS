@@ -7,6 +7,7 @@ import { toaster } from '../shell/toast.js';
 import { patternSvgMarkup, wirePatternEvents, PATTERN_MIN_LENGTH } from '../shell/patternLock.js';
 import { getBusinessDayStart, formatLocal, businessRangeFromDates } from '../shell/businessDay.js';
 import { createBackupPanel, relativeTime } from '../shell/backupPanel.js';
+import { refreshLicense } from '../shell/license.js';
 
 // Settings > Printer > Item names on receipt. Printing itself is handled in
 // electron/print/receiptTemplate.js (receiptLanguage()).
@@ -29,7 +30,11 @@ function card(title, bodyHtml, icon) {
 
 // Settings tabs (top bar). Only the selected tab's section is shown.
 // Kept at module level so the page reopens on the tab you left it on.
+const esc = (s) =>
+  String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
 const TABS = [
+  { key: 'license', label: 'License', icon: 'lock' },
   { key: 'schedule', label: 'Business Day', icon: 'clock' },
   { key: 'restaurant', label: 'Restaurant & Receipt', icon: 'settings' },
   { key: 'printer', label: 'Printer', icon: 'print' },
@@ -53,11 +58,14 @@ export function renderSettings() {
   root.innerHTML = `<div class="flex h-full w-full items-center justify-center text-sm text-ink-muted">Loading...</div>`;
 
   async function boot() {
-    const [settings, lockConfigured, lockType] = await Promise.all([
+    const [settings, lockConfigured, lockType, licenseStatus] = await Promise.all([
       posApi.settings.getAll(),
       posApi.security.isConfigured(),
       posApi.security.getLockType(),
+      refreshLicense(),
     ]);
+    // A locked POS lands on the License tab - that is the only thing to do.
+    if (licenseStatus?.locked) activeTab = 'license';
 
     root.innerHTML = `
       <header class="mb-6">
@@ -68,6 +76,7 @@ export function renderSettings() {
            screen they WRAP onto a second row instead of showing a sideways scrollbar. -->
       <nav id="settings-tabs" class="mb-6 flex max-w-4xl flex-wrap gap-2" role="tablist" aria-label="Settings sections"></nav>
       <div class="max-w-4xl">
+        <div id="license-card" data-panel="license" class="hidden"></div>
         <div id="schedule-card" data-panel="schedule" class="hidden"></div>
         <div id="info-card" data-panel="restaurant" class="hidden"></div>
         <div id="printer-card" data-panel="printer" class="hidden"></div>
@@ -90,6 +99,7 @@ export function renderSettings() {
       </div>
     `;
 
+    renderLicenseCard(licenseStatus);
     renderScheduleCard(settings);
     renderInfoCard(settings);
     renderPrinterCard(settings);
@@ -147,6 +157,96 @@ export function renderSettings() {
     attachRippleAll(tabsEl, '.settings-tab');
     root.querySelectorAll('[data-panel]').forEach((panel) => {
       panel.classList.toggle('hidden', panel.dataset.panel !== activeTab);
+    });
+  }
+
+  // ---------------- License ----------------
+  function renderLicenseCard(status) {
+    const container = root.querySelector('#license-card');
+    if (!status) {
+      container.innerHTML = card('License', '<p class="text-sm text-ink-secondary">Could not read the license status.</p>', 'lock');
+      return;
+    }
+    const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' }) : '-');
+    const tone =
+      status.state === 'active' && !status.expiringSoon
+        ? 'bg-accent/10 text-accent'
+        : status.state === 'active'
+          ? 'bg-red-50 text-red-600'
+          : 'bg-[#DC2626] text-white';
+    const stateLabel = { active: 'Active', unlicensed: 'Not activated', invalid: 'Not valid', expired: 'Expired' }[status.state] || status.state;
+    const rows =
+      status.state === 'active' || status.state === 'expired'
+        ? `<dl class="mb-5 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+             <dt class="text-ink-secondary">Plan</dt><dd class="font-medium text-ink">${esc(status.planLabel || status.plan || '-')}</dd>
+             <dt class="text-ink-secondary">Licensed to</dt><dd class="font-medium text-ink">${esc(status.customer || '-')}</dd>
+             <dt class="text-ink-secondary">Expires</dt><dd class="font-medium text-ink">${fmtDate(status.expiresAt)}${
+               status.state === 'active' && status.daysLeft != null ? ` <span class="font-normal text-ink-muted">(${status.daysLeft} day${status.daysLeft === 1 ? '' : 's'} left)</span>` : ''
+             }</dd>
+           </dl>`
+        : '';
+
+    container.innerHTML = card(
+      'License',
+      `
+      <div class="mb-4 flex flex-wrap items-center gap-3">
+        <span class="rounded-full px-3 py-1 text-xs font-semibold ${tone}">${stateLabel}</span>
+        <span class="text-sm text-ink-secondary">${esc(status.message)}</span>
+      </div>
+      ${rows}
+      ${status.clockWarning ? `<p class="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">${esc(status.clockWarning)}</p>` : ''}
+
+      <div class="mb-5">
+        <span class="mb-1.5 block text-sm font-medium text-ink-secondary">This PC's Hardware ID</span>
+        <div class="flex flex-wrap items-center gap-2">
+          <code id="hw-id" class="rounded-xl border border-border bg-surface-raised px-4 py-2.5 font-nums text-base font-semibold tracking-wider text-ink">${esc(status.hardwareId)}</code>
+          <button type="button" id="copy-hw-btn" class="ripple-host rounded-xl border border-border px-3.5 py-2.5 text-sm font-medium text-ink-secondary hover:border-accent/30 hover:text-accent">Copy</button>
+        </div>
+        <p class="mt-1.5 text-xs text-ink-muted">Send this ID to get your license key. A key only works on the PC it was made for.${
+          status.hardwareIdSource === 'file' ? ' Note: this PC could not provide a permanent ID, so reinstalling the POS may change it.' : ''
+        }</p>
+      </div>
+
+      <label class="flex flex-col gap-1.5 text-sm">
+        <span class="font-medium text-ink-secondary">${status.state === 'active' ? 'Renew / replace license key (or enter a repair code)' : 'License key (or repair code)'}</span>
+        <textarea id="license-input" rows="4" spellcheck="false" placeholder="POS1...."
+          class="break-all rounded-xl border border-border px-3.5 py-2.5 font-mono text-xs focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"></textarea>
+      </label>
+      <button type="button" id="activate-btn" class="ripple-host mt-4 rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-hover">Activate</button>
+      `,
+      'lock'
+    );
+
+    const copyBtn = container.querySelector('#copy-hw-btn');
+    attachRipple(copyBtn);
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(status.hardwareId);
+      } catch {
+        const range = document.createRange();
+        range.selectNodeContents(container.querySelector('#hw-id'));
+        window.getSelection().removeAllRanges();
+        window.getSelection().addRange(range);
+      }
+      toaster.success('Hardware ID copied.');
+    });
+
+    const activateBtn = container.querySelector('#activate-btn');
+    attachRipple(activateBtn);
+    activateBtn.addEventListener('click', async () => {
+      const input = container.querySelector('#license-input');
+      activateBtn.disabled = true;
+      try {
+        const wasLocked = status.locked;
+        const next = await posApi.license.activate(input.value);
+        await refreshLicense();
+        toaster.success(wasLocked && !next.locked ? 'License activated - the POS is unlocked.' : 'Saved.');
+        renderLicenseCard(next);
+      } catch (err) {
+        toaster.error(err.message);
+      } finally {
+        activateBtn.disabled = false;
+      }
     });
   }
 

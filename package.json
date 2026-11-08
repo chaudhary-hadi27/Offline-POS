@@ -11,13 +11,17 @@
     "build:renderer": "vite build",
     "start": "electron .",
     "postinstall": "electron-builder install-app-deps",
-    "predist:win": "node scripts/generate-master-secret-file.js && node scripts/download-chrome.js",
+    "predist:win": "node scripts/check-license-config.js && node scripts/generate-master-secret-file.js && node scripts/download-chrome.js",
     "dist:win": "npm run build:renderer && electron-builder --win --x64",
     "master-key": "node scripts/compute-master-key.js",
     "db:test": "node electron/database/__selftest__.js",
     "db:test:extended": "node electron/database/__selftest_extended__.js",
     "db:test:backup": "node electron/backup/__selftest_backup__.js",
-    "db:test:all": "npm run db:test && npm run db:test:extended && npm run db:test:backup"
+    "db:test:license": "node electron/license/__selftest_license__.js",
+    "db:test:all": "npm run db:test && npm run db:test:extended && npm run db:test:backup && npm run db:test:license",
+    "license:redteam": "node electron/license/__redteam_license__.js",
+    "license:keys": "node tools/license/generate-keys.js",
+    "license:issue": "node tools/license/issue-license.js"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",

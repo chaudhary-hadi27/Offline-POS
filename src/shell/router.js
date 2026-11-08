@@ -4,6 +4,7 @@ import { renderDashboard } from './dashboard.js';
 import { renderModulePlaceholder } from './modulePlaceholder.js';
 import { createDock } from './dock.js';
 import { shellStore } from './state.js';
+import { toaster } from './toast.js';
 import { getModule } from './modules.js';
 import { renderMenuSetup } from '../modules/menuSetup.js';
 import { renderNewOrder } from '../modules/newOrder.js';
@@ -35,7 +36,7 @@ const MODULE_RENDERERS = {
  * the brief's literal description rather than branching into
  * separate "forward"/"back" directions.
  */
-export function createRouter({ onRequestPalette, requireAccess }) {
+export function createRouter({ onRequestPalette, requireAccess, isLocked = () => false }) {
   const root = document.createElement('div');
   root.className = 'flex h-full w-full overflow-hidden bg-surface';
 
@@ -67,6 +68,13 @@ export function createRouter({ onRequestPalette, requireAccess }) {
 
   async function navigate(routeId) {
     const current = shellStore.get().route;
+    // No valid license: Settings is the only page that opens (the main
+    // process refuses the data calls too, so this is just the polite part).
+    if (isLocked() && routeId !== 'settings') {
+      toaster.error('The POS is locked. Enter your license key in Settings > License.');
+      if (current !== 'settings') return navigate('settings');
+      return;
+    }
     if (routeId === current) return;
 
     const targetModule = getModule(routeId);

@@ -117,6 +117,10 @@ module.exports = Object.freeze({
   // Generic relative-path -> data URL resolver, shared by template images
   WHATSAPP_IMAGE_GET: 'whatsapp:image-get',
 
+  // Licensing (electron/license/)
+  LICENSE_GET_STATUS: 'license:get-status',
+  LICENSE_ACTIVATE: 'license:activate',
+
   // Automatic offline backup / restore (electron/backup/backupService.js)
   BACKUP_GET_STATUS: 'backup:get-status',
   BACKUP_RUN_NOW: 'backup:run-now',

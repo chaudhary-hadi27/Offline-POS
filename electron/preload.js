@@ -142,6 +142,11 @@ contextBridge.exposeInMainWorld('pos', {
     },
   },
 
+  license: {
+    getStatus: () => invoke(CH.LICENSE_GET_STATUS),
+    activate: (text) => invoke(CH.LICENSE_ACTIVATE, text),
+  },
+
   backup: {
     getStatus: () => invoke(CH.BACKUP_GET_STATUS),
     runNow: () => invoke(CH.BACKUP_RUN_NOW),

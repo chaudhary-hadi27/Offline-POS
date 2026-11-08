@@ -37,3 +37,7 @@ Thumbs.db
 
 # Electron
 *.asar
+
+# Licensing - the PRIVATE signing key and the record of issued licenses must NEVER be committed
+license-keys/
+*.pem

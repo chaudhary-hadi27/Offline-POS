@@ -23,6 +23,11 @@ if (app.isPackaged) {
 const CH = require('./ipc-channels');
 const { initDatabase, getDb, closeDatabase } = require('./database/db');
 const { createBackupManager } = require('./backup/backupService');
+const { createLicenseManager, isChannelAllowedWhenLocked } = require('./license/licenseManager');
+const { getHardwareId } = require('./license/hardwareId');
+const { createClockStores, createLicenseFiles } = require('./license/licenseStorage');
+const { latestOrderMs, backupStateMs } = require('./license/evidence');
+const { PUBLIC_KEYS, MIN_LICENSE_EPOCH } = require('./license/publicKeys');
 const { seedMenuIfEmpty, backfillMissingUrduNames } = require('./database/seedItems');
 
 // Repositories - the ONLY place in the app that touches SQL.
@@ -57,6 +62,7 @@ let mainWindow = null;
 let machineId = null;
 let userDataDir = null;
 let backupManager = null;
+let licenseManager = null;
 
 // The window/taskbar icon while the app is running. Drop your logo at
 // build/icon.png (see build/README.md) - this picks it up automatically,
@@ -104,6 +110,13 @@ function createWindow() {
 function safeHandle(channel, handler) {
   ipcMain.handle(channel, async (_event, ...args) => {
     try {
+      // License gate. This is enforced HERE, in the main process, for every
+      // call - hiding buttons in the UI is not what protects the POS. While
+      // locked (no license / invalid / expired) only Settings, Backup and
+      // the license screen itself work.
+      if (licenseManager && licenseManager.isLocked() && !isChannelAllowedWhenLocked(channel, CH)) {
+        throw new Error('The POS is locked. Open Settings > License and enter your license key.');
+      }
       const data = await handler(...args);
       return { success: true, data };
     } catch (err) {
@@ -293,6 +306,10 @@ function registerIpcHandlers() {
     return true;
   });
 
+  // ---------- Licensing ----------
+  safeHandle(CH.LICENSE_GET_STATUS, () => licenseManager.getStatus());
+  safeHandle(CH.LICENSE_ACTIVATE, (text) => licenseManager.activate(text));
+
   // ---------- Backup / restore ----------
   safeHandle(CH.BACKUP_GET_STATUS, () => backupManager.getStatus());
   safeHandle(CH.BACKUP_RUN_NOW, () => backupManager.runNow());
@@ -322,12 +339,29 @@ function registerIpcHandlers() {
   safeHandle(CH.WHATSAPP_IMAGE_GET, (relativePath) => getItemImageDataUrl(userDataDir, relativePath));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   userDataDir = app.getPath('userData');
   initDatabase(userDataDir);
   seedMenuIfEmpty(itemsRepo);
   backfillMissingUrduNames(itemsRepo);
   machineId = getOrCreateMachineId(userDataDir);
+
+  // Licensing. Must be ready BEFORE any IPC handler is registered, because
+  // every handler checks it (see safeHandle). In development only, setting
+  // POS_LICENSE_DEV=1 skips the check; a packaged build can never skip it.
+  licenseManager = createLicenseManager({
+    getHardwareId: () => getHardwareId({ userDataDir }),
+    publicKeys: PUBLIC_KEYS,
+    minEpoch: MIN_LICENSE_EPOCH,
+    licenseFiles: createLicenseFiles({ userDataDir }),
+    clockStores: createClockStores({ userDataDir }),
+    getLatestOrderMs: () => latestOrderMs(getDb()),
+    getBackupMs: () => backupStateMs(userDataDir),
+    devBypass: !app.isPackaged && process.env.POS_LICENSE_DEV === '1',
+    log: (msg, err) => console.error(msg, err || ''),
+  });
+  await licenseManager.init();
+  licenseManager.start();
 
   // Automatic offline backup: runs shortly after the POS starts (when
   // the last good backup is older than 12h) and re-checks hourly. See
@@ -382,6 +416,10 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   if (backupManager) backupManager.stop();
+  if (licenseManager) {
+    licenseManager.stop();
+    licenseManager.flush().catch(() => {});
+  }
   closeDatabase();
   whatsappService.stopCampaign();
   whatsappService.flushCampaignState();
