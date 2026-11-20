@@ -16,6 +16,76 @@ Until a valid license is active the POS is **locked**: only *Settings* (includin
 opens. The main process refuses every other action, so this is not just hidden buttons.
 When a license expires the customer's data is never touched or hidden - Settings and Backup keep working.
 
+## Tiers: Free, Pro, Premium
+
+One licence key carries one tier, **inside the signature** (editing it breaks the key).
+
+| Tier | How you get it | What opens |
+|---|---|---|
+| **Free** | No active licence (not activated, invalid or expired) | **Settings only** (+ Backup, Security lock, printers, the licence screen) |
+| **Pro** | Key issued with `--tier pro` | Every page **except** WhatsApp Deals |
+| **Premium** | Key issued with `--tier premium` | **Everything**, including WhatsApp Deals and the WhatsApp sending-speed setting |
+
+* "Free" is never issued: it is simply what a POS without an active licence is.
+* The catalogue lives in **one file**, `electron/license/tiers.js`: every page and the tier it needs, and the rule for every IPC channel
+  (free list -> `whatsapp:*` = Premium -> everything else = Pro). **A new, unclassified channel defaults to Pro**, never to free.
+  When you add a page: add it to `PAGES` in `tiers.js` and to `src/shell/modules.js` (`npm run qa:license` fails if the two disagree).
+* Enforced in the main process (`electron/main.js` `safeHandle`), not just by hiding buttons. The screen only shows lock badges
+  ("PRO" / "PREMIUM" tags on the dashboard, dock and search) and a friendly message.
+* **Old keys** (issued before tiers existed) have no `tier`; they keep everything (`LEGACY_TIER = 'premium'` in `tiers.js`).
+* **Upgrade / downgrade:** issue a new key with the new tier (`--renew` keeps the unused days). A newer key always replaces an older one,
+  and an older key can never be re-entered to undo a downgrade (a Premium customer moved to Pro cannot bring WhatsApp back with the old key).
+* **Expiry:** when a Premium or Pro licence expires the POS drops to Free at once; the Settings > License tab shows what was licensed.
+* A running WhatsApp campaign stops by itself when the tier stops being Premium (expiry or downgrade) and can be resumed after renewal.
+
+```
+node tools/license/issue-license.js --machine A1B2-C3D4-E5F6-7890 --customer "A1 Bite" --plan Y01 --tier pro
+node tools/license/issue-license.js --machine A1B2-C3D4-E5F6-7890 --customer "A1 Bite" --plan Y01 --tier premium --renew
+```
+`--tier` has **no default** on purpose. The interactive mode asks, and shows the tier that PC had last time. `issued-licenses.csv` has a `tier` column.
+
+## WhatsApp sending speed (Settings > WhatsApp, Premium only)
+
+A toggle **Adjust sending speed** (off = always the Optimized speed). When on, ONE slider with 7 stops replaces number boxes;
+moving it fills in all four numbers. The track is green up to **Optimized** and turns amber/red beyond it.
+
+| Stop | Between customers | Between groups | Needs the risk tick |
+|---|---|---|---|
+| Very safe | 20-45 s | 15-30 min | no |
+| Safe | 12-35 s | 10-20 min | no |
+| **Optimized** (default) | 8-25 s | 6-15 min | no |
+| Fast | 6-16 s | 4-10 min | yes |
+| Faster | 5-12 s | 3-7 min | yes |
+| Very fast | 4-8 s | 2-4 min | yes |
+| Maximum | 3-5 s | 1-2 min | yes |
+
+*Advanced: type exact numbers* opens the four boxes (labelled "Custom" when they match no stop). Rules (`electron/whatsapp/timing.js`):
+
+| | Between customers | Between groups of 15 |
+|---|---|---|
+| Recommended safe speed (default) | 8-25 seconds | 6-15 minutes |
+| Hard limits (nothing outside is ever accepted or used) | 3-120 seconds | 1-60 minutes |
+
+* Slower than the safe speed: free to choose.
+* **Faster than the safe speed:** a red warning appears and Save stays disabled until the owner ticks *"I understand. If WhatsApp blocks my number
+  because of this speed, I am responsible."* The tick must come with **every** save of a faster speed; the app stamps the time itself.
+* Enforced in the main process: a save outside the limits, or a faster speed without the tick, is refused. If a faster speed is ever edited
+  into the database without the tick, the sender **ignores it and uses the safe speed**. The campaign log records when a custom speed is in use.
+* The screen keeps a copy of the numbers (`src/shell/whatsappTiming.js`); `npm run qa:whatsapp` fails if the copy and the rules differ.
+
+## Several licenses on one PC (pause and switch)
+
+A PC can hold **one Pro and one Premium** license. One runs; the other is **paused** and its days are frozen.
+
+- Premium entered while Pro runs: **Premium starts at once, Pro is paused**, Pro's days are kept.
+- Pro entered while Premium runs: it is only saved (paused). It starts when Premium ends or when the customer presses **Use this**.
+- The customer can press **Use this** (Settings > License) any time: the running one pauses, the other runs.
+- When the running license ends, the paused one starts by itself, with no gap.
+- Pause time is measured with the POS's own calendar (not the PC clock), so pausing cannot make days appear:
+  *real end = date in the key + days spent paused*. A renewal of the same tier keeps the paused days.
+- `--exclusive` on a key removes the other license and blocks older keys of the other tier for good (refund / downgrade).
+- One license is stored as the plain key (older builds can read it); two are stored as a small list.
+
 ## One-time setup
 
 1. `npm run license:keys` (or `node tools/license/generate-keys.js`)
@@ -29,7 +99,8 @@ When a license expires the customer's data is never touched or hidden - Settings
 3. Never commit `license-keys/` (already in `.gitignore`) and never put a `.pem` inside `electron/` or `dist/`.
    `npm run dist:win` runs `scripts/check-license-config.js` first and refuses to build if the public key
    is missing or a private key is in the package.
-4. `npm run dist:win` to build the installer.
+4. `npm run recovery:keys` the same way for **Forgot PIN** (a different key pair; see `docs/RELEASE_GUIDE.md`).
+5. `npm run dist:win` to build the installer.
 
 ## Giving a customer a license
 
@@ -38,7 +109,7 @@ When a license expires the customer's data is never touched or hidden - Settings
 2. On your PC (with the private key available):
    `npm run license:issue` — it asks for the Hardware ID, customer name and plan, then the passphrase.
    Or in one line:
-   `node tools/license/issue-license.js --machine A1B2-C3D4-E5F6-7890 --customer "A1 Bite" --plan Y01`
+   `node tools/license/issue-license.js --machine A1B2-C3D4-E5F6-7890 --customer "A1 Bite" --plan Y01 --tier pro`
 3. Send the whole `POS1.…` text (WhatsApp is fine, line wrapping does not matter).
 4. The customer pastes it into *Settings → License → Activate*. The POS unlocks immediately.
 
@@ -107,8 +178,9 @@ release. Licenses from before the bump stop working on the new build. Customers 
 
 ## Development
 
-Run the app unlocked while developing: `POS_LICENSE_DEV=1 npm start`. This works **only** when the app is not packaged;
-an installed build has no way to skip the check.
+Run the app unlocked while developing: `POS_LICENSE_DEV=1 npm start`. This works **only** from a source checkout: the bypass lives in `electron/license/devBypass.js`, which the installer
+excludes, and it also refuses to run from any `.asar`. (Do not rely on `app.isPackaged` alone: Electron derives it from
+the exe name, so renaming the exe to `electron.exe` would fool it.)
 
 ## What was tried to break it (`npm run license:redteam`)
 
@@ -143,9 +215,22 @@ cost for attackers further: code-sign the installer, turn on Electron's ASAR int
 
 ## Not covered yet
 
-- The Forgot-PIN *master key* still uses the shared secret bundled in the app (`scripts/generate-master-secret-file.js`).
-  Anyone who unpacks the app can compute recovery keys for any PC. It should move to the same signed challenge/response scheme.
 - Shop details (phone, logo) on the first-run Settings screen are not part of this change.
+
+## Tests
+
+```
+npm run qa:all          licence + WhatsApp + the original red-team script
+npm run qa:license      ~120 adversarial licence checks (keys, clock, tiers, gate, vendor tool)
+npm run qa:whatsapp     campaign stops on lock / resumes; sending-speed rules and the real loop
+npm run qa:ui           (needs: npm i --no-save jsdom) tier badges, router, Settings WhatsApp tab
+```
+
+## More guides
+
+- `docs/ADMIN_MANUAL.md` how you run customers by hand (new, renew, upgrade, refund, old keys, reinstall, PIN reset)
+- `docs/RELEASE_GUIDE.md` build safely + the Windows checklist
+- `docs/SCENARIOS.md` every situation the system is tested against
 
 ## Files
 

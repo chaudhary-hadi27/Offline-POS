@@ -14,7 +14,7 @@ database on the restaurant's own PC.
 - **Analytics & Reports** — sales trends, top items, performance charts
 - **WhatsApp Deals** — send deal broadcasts to customers straight from the app
 - **Business-day aware** — a configurable day-start time (not midnight) drives what counts as "today" across history and reports
-- **Secured admin area** — PIN / password / pattern lock with a security-question and master-key recovery path for lockouts
+- **Secured admin area** — PIN / password / pattern lock with a security-question and signed developer-recovery path for lockouts
 - **Automatic offline backup** — runs by itself when the POS starts (and every 12h while open): verified database snapshots + an incremental image mirror, kept on this PC and optionally on a USB / second-disk folder, with automatic retention and one-click restore (Settings → Backup & Restore)
 - **Licensing** — offline, tied to the PC (Windows MachineGuid), signed with your private key (Ed25519), trial / yearly / multi-year plans, clock-rollback protection, and a locked mode where only Settings + Backup work. See [docs/LICENSING_GUIDE.md](docs/LICENSING_GUIDE.md)
 - **Danger Zone + Hidden Records** — soft-delete old orders out of History & Reports; Hidden Records shows live + hidden orders together and is where you permanently delete records when you're sure
@@ -45,17 +45,15 @@ npm run dev       # Vite dev server (browser preview, mock data layer)
 
 ## Building the Windows installer
 
-Building a distributable `.exe` requires a one-time master-key secret (used
-for the offline PIN-recovery flow). See
-[`docs/MASTER_KEY_AND_BUILD_GUIDE.md`](docs/MASTER_KEY_AND_BUILD_GUIDE.md)
-for the full walkthrough. Short version:
+One-time: `npm run license:keys` and `npm run recovery:keys` (your private keys stay on your PC). Then:
 
 ```powershell
-$env:POS_MASTER_SECRET="your-own-long-random-secret"
-npm run dist:win
+npm run qa:all
+npm run dist:win     # runs the release pre-flight first and stops if anything is unsafe
 ```
 
-The installer is written to `release/`.
+The installer is written to `release/`. Full steps and the Windows test list: [`docs/RELEASE_GUIDE.md`](docs/RELEASE_GUIDE.md).
+Running customers by hand: [`docs/ADMIN_MANUAL.md`](docs/ADMIN_MANUAL.md).
 
 ## Tests
 
@@ -75,7 +73,7 @@ src/
   shell/          App chrome: router, dashboard, command palette, gatekeeper lock
   styles/          Tailwind entry + custom animations
 docs/             Build & operations guides
-scripts/          One-off build/setup scripts (master key, Chrome bundling)
+scripts/          Release pre-flight and build helpers (Chrome bundling)
 ```
 
 ## License

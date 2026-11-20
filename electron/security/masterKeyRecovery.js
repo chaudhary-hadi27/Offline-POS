@@ -1,119 +1,75 @@
 'use strict';
 
 const crypto = require('crypto');
+const { RECOVERY_PUBLIC_KEYS } = require('./recoveryPublicKeys');
 
 /**
- * DESIGN
- * ------
- * The client is completely offline, so recovery cannot involve a
- * server round-trip. Instead:
+ * "Forgot PIN" recovery by the developer, with NO secret inside the app.
  *
- *  1. The app shows an 8-character CHALLENGE code, derived from this
- *     machine's persisted fingerprint (machineId.js) + today's UTC
- *     date. It's the same code all day on this machine, and different
- *     tomorrow or on any other install.
- *  2. The client reads that challenge to the developer/vendor over
- *     the phone.
- *  3. The developer - who holds MASTER_SECRET, and ONLY the developer,
- *     never shipped in the app bundle in a real deployment - computes
- *     the matching response key (via scripts/compute-master-key.js)
- *     and reads it back.
- *  4. The app recomputes the same response locally and compares.
+ *  1. The lock screen shows an 8-character CHALLENGE (this PC's id + today's UTC date).
+ *  2. The customer sends it to the developer (message or call).
+ *  3. The developer signs it with the PRIVATE recovery key (tools/license/issue-pin-reset.js)
+ *     and sends back a response code: "PR1." + a signature.
+ *  4. The app checks the signature with the PUBLIC recovery key that ships inside it.
  *
- * No secret ever needs to leave the developer's machine, and the code
- * is single-day/single-machine so it can't be reused later or shared
- * between installs.
- *
- * WHERE THE SECRET ACTUALLY LIVES AT RUNTIME
- * -------------------------------------------
- * A packaged .exe on a customer's PC will NEVER have POS_MASTER_SECRET
- * set as a real environment variable - customers don't set env vars,
- * and Electron doesn't inherit a build machine's shell environment
- * into the finished installer. So this can't just read process.env at
- * runtime in production; it needs the secret literally compiled into
- * the app bundle at build time. That's what
- * electron/security/master-secret.generated.js is for:
- * `npm run dist:win` runs scripts/generate-master-secret-file.js
- * first, which reads POS_MASTER_SECRET from YOUR (the developer's)
- * shell environment and writes it as a plain exported string into
- * that generated file - which then ships inside the asar bundle.
- * See docs/MASTER_KEY_AND_BUILD_GUIDE.md for the full walkthrough.
+ * Only the private key can make a valid response, and it never leaves the developer's PC.
+ * A response works for one PC and one day (today or yesterday UTC, to cover midnight).
+ * Anyone can read the public key out of the installed app; that gives them nothing.
  */
 
-function getMasterSecret() {
-  // 1) Preferred: the value baked in at build time by
-  //    scripts/generate-master-secret-file.js - this is what actually
-  //    ships to customers.
-  try {
-    // eslint-disable-next-line global-require
-    const generated = require('./master-secret.generated');
-    if (generated && typeof generated.MASTER_SECRET === 'string' && generated.MASTER_SECRET.trim().length >= 16) {
-      return generated.MASTER_SECRET.trim();
-    }
-  } catch (err) {
-    // File missing entirely (e.g. very first checkout) - fall through.
-  }
+const PREFIX = 'PR1.';
+const DOMAIN = 'pos-pin-reset-v1';
 
-  // 2) Dev convenience: an env var set in the current shell, so
-  //    `npm start` during development can exercise this without
-  //    running the build-time injector first.
-  const fromEnv = process.env.POS_MASTER_SECRET;
-  if (fromEnv && fromEnv.trim().length >= 16) return fromEnv.trim();
-
-  console.warn(
-    '[security] No real POS_MASTER_SECRET found (checked the generated ' +
-      'file and the environment). Using an insecure development ' +
-      'fallback - run scripts/generate-master-secret-file.js with a ' +
-      'real secret before shipping a build to a customer.'
-  );
-  return 'dev-only-insecure-fallback-secret-do-not-ship';
+function dayString(date) {
+  return date.toISOString().slice(0, 10); // UTC YYYY-MM-DD
 }
 
-function getChallengeCode(machineId) {
-  const dateStr = new Date().toISOString().slice(0, 10); // UTC YYYY-MM-DD - rotates daily
-  return crypto
-    .createHash('sha256')
-    .update(`${machineId}:${dateStr}`)
-    .digest('hex')
-    .slice(0, 8)
-    .toUpperCase();
+function getChallengeCode(machineId, date = new Date()) {
+  return crypto.createHash('sha256').update(`${machineId}:${dayString(date)}`).digest('hex').slice(0, 8).toUpperCase();
 }
 
-/** Strips the display formatting (dashes/spaces) a human might have
- *  copied along with the code, so it doesn't matter whether the
- *  dashed "A1B2-C3D4" or the bare "A1B2C3D4" form gets passed in here -
- *  both hash identically. Without this, reading the on-screen dashed
- *  challenge straight into this function would silently produce the
- *  wrong response key. */
-function normalizeCode(code) {
+/** Drop the dashes/spaces a person may copy along with the code. */
+function normalizeChallenge(code) {
   return String(code || '').replace(/[\s-]/g, '').toUpperCase();
 }
 
-function computeResponseKey(challengeCode) {
-  return crypto
-    .createHmac('sha256', getMasterSecret())
-    .update(normalizeCode(challengeCode))
-    .digest('hex')
-    .slice(0, 10)
-    .toUpperCase();
-}
-
 function formatForDisplay(code) {
-  // Group into 4-character blocks (e.g. "A1B2-C3D4-E5") purely for
-  // readability when reading the code aloud over the phone.
-  return code.match(/.{1,4}/g).join('-');
+  return code.match(/.{1,4}/g).join('-'); // "A1B2-C3D4": easy to read out
 }
 
-function generateChallenge(machineId) {
-  const code = getChallengeCode(machineId);
+function generateChallenge(machineId, date = new Date()) {
+  const code = getChallengeCode(machineId, date);
   return { challenge: formatForDisplay(code), raw: code };
 }
 
-function verifyMasterKey(machineId, candidateKey) {
-  const challenge = getChallengeCode(machineId);
-  const expected = computeResponseKey(challenge);
-  const normalized = normalizeCode(candidateKey);
-  return normalized === expected;
+/** The exact bytes the developer signs. Domain-separated so no licence or repair signature can ever match. */
+function recoveryMessage(challenge) {
+  return Buffer.from(`${DOMAIN}|${normalizeChallenge(challenge)}`, 'utf8');
 }
 
-module.exports = { generateChallenge, verifyMasterKey, computeResponseKey, getChallengeCode };
+/** Strip whitespace and invisible characters a chat app may add; the code itself is case-sensitive. */
+function cleanResponse(text) {
+  return String(text || '').replace(/[\s\p{Cf}]+/gu, '');
+}
+
+function verifyMasterKey(machineId, candidate, { keys = RECOVERY_PUBLIC_KEYS, now = new Date() } = {}) {
+  try {
+    if (!Array.isArray(keys) || keys.length === 0) return false; // recovery is not configured: nothing can match
+    const t = cleanResponse(candidate);
+    if (!t.startsWith(PREFIX)) return false;
+    const sig = Buffer.from(t.slice(PREFIX.length), 'base64url');
+    if (sig.length !== 64) return false;
+    const days = [now, new Date(now.getTime() - 24 * 60 * 60 * 1000)]; // today and yesterday (UTC)
+    for (const day of days) {
+      const msg = recoveryMessage(getChallengeCode(machineId, day));
+      for (const k of keys) {
+        if (crypto.verify(null, msg, crypto.createPublicKey(k.pem), sig)) return true;
+      }
+    }
+  } catch {
+    // anything odd means "not valid"
+  }
+  return false;
+}
+
+module.exports = { PREFIX, DOMAIN, generateChallenge, verifyMasterKey, getChallengeCode, recoveryMessage, normalizeChallenge };

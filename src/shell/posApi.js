@@ -795,16 +795,13 @@ function createMock() {
       async getLockType() {
         return state.securityConfig?.lockType || null;
       },
-      // Fixed mock challenge/response pair (no real crypto needed here -
-      // the real HMAC derivation is already independently verified in
-      // electron/security/masterKeyRecovery.js). Preview mode just needs
-      // something predictable to drive the UI against: the response is
-      // always "MASTERKEY".
+      // Preview mode only: a fixed challenge and a fixed reply, so the lock screen can be tried in a browser.
+      // The real check (a signature made with the developer's private key) is in electron/security/masterKeyRecovery.js.
       async getRecoveryChallenge() {
-        return 'PRVW-0000 (preview mode - key is "MASTERKEY")';
+        return 'PRVW-0000 (preview: reply is PR1.PREVIEW)';
       },
       async verifyMasterKey(candidate) {
-        const ok = String(candidate).trim().toUpperCase().replace(/[\s-]/g, '') === 'MASTERKEY';
+        const ok = String(candidate).trim() === 'PR1.PREVIEW';
         if (ok) state.securityConfig = null;
         return ok;
       },
@@ -996,6 +993,9 @@ function createMock() {
           state: 'active',
           locked: false,
           plan: 'DEV',
+          tier: 'premium',
+          tierLabel: 'Premium',
+          licensedTier: 'premium',
           planLabel: 'Browser preview (no license check)',
           customer: null,
           issuedAt: null,
@@ -1010,6 +1010,9 @@ function createMock() {
       },
       async activate() {
         throw new Error('License activation only works in the installed POS app.');
+      },
+      async use() {
+        throw new Error('Switching licenses only works in the installed POS app.');
       },
     },
 
@@ -1105,6 +1108,9 @@ function createMock() {
         },
         async stopCampaign() {
           return true;
+        },
+        async resolveUncertain() {
+          throw new Error(PREVIEW_MESSAGE);
         },
         async newCampaign() {
           return true;

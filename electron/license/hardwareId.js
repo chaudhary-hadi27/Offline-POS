@@ -49,13 +49,27 @@ function runExecFile(file, args, timeout = 5000) {
 /**
  * @returns {Promise<{id:string, source:'machine-guid'|'machine-id'|'file'}>}
  */
-async function getHardwareId({ userDataDir, platform = process.platform, run = runExecFile, readFile = fs.promises.readFile } = {}) {
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function getHardwareId({ userDataDir, platform = process.platform, run = runExecFile, readFile = fs.promises.readFile, attempts = 3, retryDelayMs = 700, sleep = sleepMs } = {}) {
   try {
     if (platform === 'win32') {
       const reg = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe');
-      const out = await run(reg, ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid', '/reg:64']);
-      const guid = parseMachineGuid(out);
-      if (guid) return { id: hashToHardwareId(guid), source: 'machine-guid' };
+      // reg.exe can fail once for harmless reasons (antivirus scan, a slow boot, a 5 s timeout).
+      // One hiccup must never change the PC's identity, so try a few times before giving up.
+      let lastErr = null;
+      for (let i = 0; i < attempts; i++) {
+        try {
+          const out = await run(reg, ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid', '/reg:64']);
+          const guid = parseMachineGuid(out);
+          if (guid) return { id: hashToHardwareId(guid), source: 'machine-guid' };
+          lastErr = new Error('MachineGuid not found in reg.exe output');
+        } catch (err) {
+          lastErr = err;
+        }
+        if (i < attempts - 1) await sleep(retryDelayMs);
+      }
+      throw lastErr || new Error('could not read MachineGuid');
     } else if (platform === 'linux') {
       for (const f of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
         try {

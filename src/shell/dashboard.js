@@ -4,6 +4,7 @@ import { MODULES } from './modules.js';
 import { iconMarkup } from './icons.js';
 import { attachRippleAll } from './ripple.js';
 import { posApi } from './posApi.js';
+import { pageAccess, onLicenseChange, tierPillMarkup } from './license.js';
 
 function moduleCard(mod) {
   const lockBadge = mod.secured
@@ -22,6 +23,7 @@ function moduleCard(mod) {
              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
     >
       ${lockBadge}
+      <span data-tier-slot class="absolute bottom-3 right-3"></span>
       <span class="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent">
         <span class="h-6 w-6">${iconMarkup(mod.icon)}</span>
       </span>
@@ -74,6 +76,18 @@ export function renderDashboard({ onNavigate }) {
       </div>
     </section>
   `;
+
+  // Mark pages the current license does not include (and refresh when the license changes).
+  const applyAccess = () => {
+    el.querySelectorAll('[data-module-id]').forEach((card) => {
+      const a = pageAccess(card.dataset.moduleId);
+      card.classList.toggle('opacity-60', !a.allowed);
+      card.querySelector('[data-tier-slot]').innerHTML = a.allowed ? '' : tierPillMarkup(a.required);
+    });
+  };
+  applyAccess();
+  const offLicense = onLicenseChange(applyAccess);
+  el._cleanup = () => offLicense();
 
   el.querySelectorAll('[data-module-id]').forEach((card) => {
     card.addEventListener('click', () => onNavigate(card.dataset.moduleId));

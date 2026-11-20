@@ -1,6 +1,7 @@
 'use strict';
 
 import { MODULES } from './modules.js';
+import { pageAccess, tierPillMarkup } from './license.js';
 import { iconMarkup } from './icons.js';
 
 /**
@@ -144,6 +145,7 @@ export function createCommandPalette({ onNavigate }) {
               <span class="block font-medium">${mod.title}</span>
               <span class="block text-xs text-ink-muted">${mod.subtitle}</span>
             </span>
+            ${mod.id && !pageAccess(mod.id).allowed ? tierPillMarkup(pageAccess(mod.id).required) : ''}
             ${mod.secured ? `<span class="h-3.5 w-3.5 text-ink-muted">${iconMarkup('lock')}</span>` : ''}
           </button>
         </li>`

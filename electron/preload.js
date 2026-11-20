@@ -145,6 +145,7 @@ contextBridge.exposeInMainWorld('pos', {
   license: {
     getStatus: () => invoke(CH.LICENSE_GET_STATUS),
     activate: (text) => invoke(CH.LICENSE_ACTIVATE, text),
+    use: (slot) => invoke(CH.LICENSE_USE, slot),
   },
 
   backup: {
@@ -167,6 +168,7 @@ contextBridge.exposeInMainWorld('pos', {
     retryFailed: () => invoke(CH.WHATSAPP_RETRY_FAILED),
     stopCampaign: () => invoke(CH.WHATSAPP_STOP_CAMPAIGN),
     newCampaign: () => invoke(CH.WHATSAPP_NEW_CAMPAIGN),
+    resolveUncertain: (action) => invoke(CH.WHATSAPP_RESOLVE_UNCERTAIN, action),
     // Push-only channel from main -> renderer. Returns an unsubscribe
     // function so a module can cleanly detach when it unmounts.
     onEvent: (callback) => {

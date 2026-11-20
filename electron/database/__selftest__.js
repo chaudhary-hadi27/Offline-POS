@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const assert = require('assert');
 
-const { initDatabase, closeDatabase } = require('./db');
+const { initDatabase, closeDatabase, getDb } = require('./db');
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pos-selftest-'));
 initDatabase(tmpDir);
@@ -131,8 +131,14 @@ check('close shift computes variance', () => {
   assert.strictEqual(closed.status, 'CLOSED');
 });
 
-check('deleting an item referenced by an order is blocked by FK', () => {
-  assert.throws(() => items.deleteItem(biryani.id));
+check('deleting an item used by an old order succeeds and keeps the order line (item_id detached)', () => {
+  // deleteItem() deliberately detaches order lines instead of blocking: receipts of past orders stay intact.
+  const before = getDb().prepare('SELECT COUNT(*) AS n FROM order_items WHERE item_id = ?').get(biryani.id).n;
+  assert.ok(before > 0, 'the order references the item');
+  assert.strictEqual(items.deleteItem(biryani.id), true);
+  assert.strictEqual(getDb().prepare('SELECT COUNT(*) AS n FROM items WHERE id = ?').get(biryani.id).n, 0);
+  const lines = getDb().prepare('SELECT COUNT(*) AS n FROM order_items WHERE item_id IS NULL').get().n;
+  assert.ok(lines >= before, 'the order lines are still there, just detached');
 });
 
 closeDatabase();

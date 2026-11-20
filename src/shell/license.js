@@ -23,6 +23,41 @@ export async function refreshLicense() {
 }
 
 export const getLicenseStatus = () => status;
+
+const TIER_LABEL = { free: 'Free', pro: 'Pro', premium: 'Premium' };
+export const tierLabel = (t) => TIER_LABEL[t] || TIER_LABEL.free;
+
+/** The tier in force right now ('free' = no active license). */
+export const getTier = () => (status && status.tier) || 'free';
+
+/**
+ * Whether a page opens with the current license. The table comes from the main process
+ * (electron/license/tiers.js) so the screen never guesses; before the first status arrives
+ * nothing is blocked here (the main process enforces regardless).
+ */
+export function pageAccess(id) {
+  const p = status && status.pages && status.pages[id];
+  return p || { allowed: true, required: 'free', title: id };
+}
+
+/** Same idea for features that are not a page of their own ('whatsapp-timing', ...). */
+export function featureAccess(id) {
+  const f = status && status.features && status.features[id];
+  return f || { allowed: true, required: 'free', title: id };
+}
+
+export function accessMessage(id) {
+  const a = pageAccess(id);
+  if (isLocked()) return 'The POS is locked. Enter your license key in Settings > License.';
+  return `${a.title} needs the ${tierLabel(a.required)} license. Your license is ${tierLabel(getTier())}. Ask your provider to upgrade it, then enter the new key in Settings > License.`;
+}
+
+/** Small "PRO" / "PREMIUM" tag for things the current license does not include. */
+export function tierPillMarkup(required, extraClass = '') {
+  if (!required || required === 'free') return '';
+  const tone = required === 'premium' ? 'bg-amber-100 text-amber-700' : 'bg-sky-100 text-sky-700';
+  return `<span class="tier-pill rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${tone} ${extraClass}">${tierLabel(required)}</span>`;
+}
 export const isLocked = () => !!status && status.locked === true;
 
 export function onLicenseChange(fn) {

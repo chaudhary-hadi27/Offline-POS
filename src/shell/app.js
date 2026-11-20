@@ -9,6 +9,7 @@ import { shellStore } from './state.js';
 import { posApi } from './posApi.js';
 import { toaster } from './toast.js';
 import { refreshLicense, isLocked, createLicenseBanner } from './license.js';
+import { createCampaignBanner } from './campaignBanner.js';
 import { createTopBar } from './topBar.js';
 
 async function applyPersistedTheme() {
@@ -57,12 +58,14 @@ export function mountApp(root) {
     isLocked,
   });
   const licenseBanner = createLicenseBanner({ onOpen: () => router.navigate('settings') });
+  const campaignBanner = createCampaignBanner({ onOpen: () => router.navigate('whatsapp-deals') });
   const shortcutBar = createShortcutBar({
     onRequestOpen: () => sheet.open(shellStore.get().route),
   });
 
   shell.appendChild(createTopBar().el);
   shell.appendChild(licenseBanner.el);
+  shell.appendChild(campaignBanner.el);
   shell.appendChild(router.el);
   shell.appendChild(shortcutBar.el);
   root.appendChild(shell);

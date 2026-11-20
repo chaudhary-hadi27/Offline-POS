@@ -12,7 +12,16 @@ function ask(question, { hidden = false } = {}) {
         else if (s.includes('\n') || s.includes('\r')) process.stdout.write('\n');
       };
     }
+    let answered = false;
+    // Input ended without an answer (no keyboard attached, piped/closed stdin): stop with a clear
+    // error and a non-zero exit code instead of exiting "successfully" with nothing issued.
+    rl.on('close', () => {
+      if (answered) return;
+      process.stderr.write('\nNo answer was given (input is closed). Pass the value as an option, e.g. --tier premium. Nothing was issued.\n');
+      process.exit(1);
+    });
     rl.question(question, (answer) => {
+      answered = true;
       rl.close();
       resolve(answer);
     });

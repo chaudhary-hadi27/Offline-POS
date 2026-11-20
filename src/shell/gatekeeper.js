@@ -241,14 +241,14 @@ export function createGatekeeper() {
     bodyEl.innerHTML = `
       <div class="mb-4 text-center">
         <h2 class="font-display text-lg font-bold text-ink">Developer recovery</h2>
-        <p class="text-sm text-ink-secondary">Read this code to your developer/vendor over the phone</p>
+        <p class="text-sm text-ink-secondary">Send this code to your provider. Paste the reply below.</p>
       </div>
       <div class="mb-4 rounded-xl border border-dashed border-accent/40 bg-accent/5 px-4 py-3 text-center">
         <span class="font-nums text-xl font-bold tracking-wider text-accent">${challenge}</span>
       </div>
       <form id="gk-masterkey-form" class="flex flex-col gap-3">
-        <input type="text" name="masterKey" autofocus placeholder="Enter the key they give you"
-          class="rounded-xl border border-border px-3.5 py-2.5 text-sm uppercase tracking-wide focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
+        <input type="text" name="masterKey" autofocus autocomplete="off" spellcheck="false" placeholder="PR1...."
+          class="rounded-xl border border-border px-3.5 py-2.5 font-mono text-xs focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
         <button type="submit" class="ripple-host rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-hover">Unlock</button>
       </form>
       <button type="button" id="gk-back-link" class="mt-4 w-full text-center text-sm text-ink-muted hover:text-accent">Back</button>
@@ -264,7 +264,7 @@ export function createGatekeeper() {
           mode = 'set-new-lock';
           render();
         } else {
-          showError(bodyEl, 'That key is not valid.');
+          showError(bodyEl, 'This code is not valid. Check it, or ask for a new one today.');
         }
       } catch (err) {
         showError(bodyEl, err.message);

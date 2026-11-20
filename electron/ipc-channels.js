@@ -103,6 +103,7 @@ module.exports = Object.freeze({
   WHATSAPP_RESUME_CAMPAIGN: 'whatsapp:resume-campaign',
   WHATSAPP_RETRY_FAILED: 'whatsapp:retry-failed',
   WHATSAPP_STOP_CAMPAIGN: 'whatsapp:stop-campaign',
+  WHATSAPP_RESOLVE_UNCERTAIN: 'whatsapp:resolve-uncertain',
   WHATSAPP_NEW_CAMPAIGN: 'whatsapp:new-campaign',
   WHATSAPP_GET_CAMPAIGN_STATE: 'whatsapp:get-campaign-state',
   // Push-only channel: main -> renderer. Never invoked by the renderer.
@@ -120,6 +121,7 @@ module.exports = Object.freeze({
   // Licensing (electron/license/)
   LICENSE_GET_STATUS: 'license:get-status',
   LICENSE_ACTIVATE: 'license:activate',
+  LICENSE_USE: 'license:use', // choose which saved license runs (the other is paused)
 
   // Automatic offline backup / restore (electron/backup/backupService.js)
   BACKUP_GET_STATUS: 'backup:get-status',

@@ -23,11 +23,22 @@ if (app.isPackaged) {
 const CH = require('./ipc-channels');
 const { initDatabase, getDb, closeDatabase } = require('./database/db');
 const { createBackupManager } = require('./backup/backupService');
-const { createLicenseManager, isChannelAllowedWhenLocked } = require('./license/licenseManager');
+const { createLicenseManager } = require('./license/licenseManager');
+const whatsappTiming = require('./whatsapp/timing');
+const { requiredTierForChannel, tierSatisfies, refusalMessage } = require('./license/tiers');
 const { getHardwareId } = require('./license/hardwareId');
 const { createClockStores, createLicenseFiles } = require('./license/licenseStorage');
 const { latestOrderMs, backupStateMs } = require('./license/evidence');
 const { PUBLIC_KEYS, MIN_LICENSE_EPOCH } = require('./license/publicKeys');
+
+// Development-only licence bypass. The file is NOT shipped in the installer, so
+// in an installed build this stays false no matter what (see license/devBypass.js).
+let isDevBypassEnabled = () => false;
+try {
+  ({ isDevBypassEnabled } = require('./license/devBypass'));
+} catch {
+  // not present in production builds - expected
+}
 const { seedMenuIfEmpty, backfillMissingUrduNames } = require('./database/seedItems');
 
 // Repositories - the ONLY place in the app that touches SQL.
@@ -96,6 +107,23 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 
+  // Typing safety net. On Windows, Electron can leave the page unable to take keyboard input (every text box,
+  // including Search) after a NATIVE alert/confirm/prompt. The app uses its own dialogs (src/shell/confirmDialog.js),
+  // and these two guards make sure that one slipping in again can never freeze typing:
+  //  1. native dialogs are replaced by harmless stand-ins (logged, answered "no"),
+  //  2. whenever the window gets focus back, keyboard focus is handed to the page again.
+  mainWindow.webContents.on('dom-ready', () => {
+    mainWindow.webContents
+      .executeJavaScript(
+        `(() => { const warn = (n) => console.error('[pos] native ' + n + '() is blocked: use confirmAction() from src/shell/confirmDialog.js');
+          window.alert = () => warn('alert'); window.confirm = () => { warn('confirm'); return false; }; window.prompt = () => { warn('prompt'); return null; }; })();`
+      )
+      .catch(() => {});
+  });
+  mainWindow.on('focus', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.focus();
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -114,8 +142,10 @@ function safeHandle(channel, handler) {
       // call - hiding buttons in the UI is not what protects the POS. While
       // locked (no license / invalid / expired) only Settings, Backup and
       // the license screen itself work.
-      if (licenseManager && licenseManager.isLocked() && !isChannelAllowedWhenLocked(channel, CH)) {
-        throw new Error('The POS is locked. Open Settings > License and enter your license key.');
+      if (licenseManager) {
+        const need = requiredTierForChannel(channel, CH);
+        const have = licenseManager.getTier();
+        if (!tierSatisfies(have, need)) throw new Error(refusalMessage(have, need));
       }
       const data = await handler(...args);
       return { success: true, data };
@@ -232,6 +262,13 @@ function registerIpcHandlers() {
   // ---------- Settings ----------
   safeHandle(CH.SETTINGS_GET_ALL, () => settingsRepo.getAllSettings());
   safeHandle(CH.SETTINGS_SET, (entries) => {
+    if (!entries || typeof entries !== 'object' || Array.isArray(entries)) throw new Error('Invalid settings.');
+    // WhatsApp sending speed: Premium only, and the safe limits / risk confirmation are enforced HERE,
+    // not just on the screen (see whatsapp/timing.js).
+    if (whatsappTiming.touchesTimingKeys(entries)) {
+      if (!licenseManager.hasTier('premium')) throw new Error(refusalMessage(licenseManager.getTier(), 'premium'));
+      entries = whatsappTiming.validateTimingEntries(entries, settingsRepo.getAllSettings());
+    }
     const result = settingsRepo.setSettings(entries);
     // Settings (including which printer is selected) just changed - drop
     // any cached auto-detected paper width so the next print re-detects
@@ -274,6 +311,7 @@ function registerIpcHandlers() {
   safeHandle(CH.WHATSAPP_RETRY_FAILED, () => whatsappService.retryFailedCampaign());
   safeHandle(CH.WHATSAPP_STOP_CAMPAIGN, () => whatsappService.stopCampaign());
   safeHandle(CH.WHATSAPP_NEW_CAMPAIGN, () => whatsappService.newCampaign());
+  safeHandle(CH.WHATSAPP_RESOLVE_UNCERTAIN, (action) => whatsappService.resolveUncertain(String(action)));
 
   // ---------- WhatsApp Deal Sender: saved templates ----------
   // Mirrors the ITEM_CREATE / ITEM_UPDATE image-handling pattern above:
@@ -309,6 +347,7 @@ function registerIpcHandlers() {
   // ---------- Licensing ----------
   safeHandle(CH.LICENSE_GET_STATUS, () => licenseManager.getStatus());
   safeHandle(CH.LICENSE_ACTIVATE, (text) => licenseManager.activate(text));
+  safeHandle(CH.LICENSE_USE, (slot) => licenseManager.useLicense(String(slot)));
 
   // ---------- Backup / restore ----------
   safeHandle(CH.BACKUP_GET_STATUS, () => backupManager.getStatus());
@@ -348,7 +387,8 @@ app.whenReady().then(async () => {
 
   // Licensing. Must be ready BEFORE any IPC handler is registered, because
   // every handler checks it (see safeHandle). In development only, setting
-  // POS_LICENSE_DEV=1 skips the check; a packaged build can never skip it.
+  // POS_LICENSE_DEV=1 skips the check, but only from a source checkout: the bypass
+  // file is not part of the installer.
   licenseManager = createLicenseManager({
     getHardwareId: () => getHardwareId({ userDataDir }),
     publicKeys: PUBLIC_KEYS,
@@ -357,7 +397,7 @@ app.whenReady().then(async () => {
     clockStores: createClockStores({ userDataDir }),
     getLatestOrderMs: () => latestOrderMs(getDb()),
     getBackupMs: () => backupStateMs(userDataDir),
-    devBypass: !app.isPackaged && process.env.POS_LICENSE_DEV === '1',
+    devBypass: isDevBypassEnabled({ app }),
     log: (msg, err) => console.error(msg, err || ''),
   });
   await licenseManager.init();
@@ -390,6 +430,13 @@ app.whenReady().then(async () => {
   // is currently open. If the window is ever recreated (macOS-style
   // activate flow) this still points at the live instance because it
   // re-reads `mainWindow` on every call rather than capturing it once.
+  // A running campaign must stop by itself when the licence runs out (see whatsappService.shouldStop).
+  // WhatsApp is a Premium feature: a campaign stops when the licence expires OR is replaced by a Pro key.
+  whatsappService.setLicenseGuard(() => (licenseManager ? !licenseManager.hasTier('premium') : false));
+
+  // The sender gets the RAW saved settings and resolves them itself (whatsapp/timing.js) before every wait.
+  whatsappService.setTimingProvider(() => settingsRepo.getAllSettings());
+
   whatsappService.setEventSink((payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send(CH.WHATSAPP_EVENT, payload);

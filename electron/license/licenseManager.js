@@ -42,11 +42,21 @@
  * POS from starting. Beyond this, a determined person with admin rights can still
  * cheat - that is the honest limit of offline licensing (see docs/LICENSING_GUIDE.md).
  *
- * RENEWING. A newer license (later issue date) simply replaces the current
- * one - there is no moment without a license, the POS never locks in
- * between. An older key cannot replace a newer one.
+ * RENEWING. A newer license (later issue date) of the SAME tier simply replaces the
+ * current one - there is no moment without a license, the POS never locks in between.
+ * An older key cannot replace a newer one.
+ *
+ * SEVERAL LICENSES ("wallet"). A PC can hold one Pro and one Premium license. Exactly one is
+ * ACTIVE; the other is PAUSED and its remaining days are frozen (they only count while it is
+ * active). Entering a higher-tier key starts it at once and pauses the lower one; entering a
+ * lower-tier key just saves it. The customer can switch at any time (Settings > License), and
+ * when the active license ends the paused one starts by itself. Pause time is measured with the
+ * POS's own calendar (T), never with the PC clock, so pausing cannot be used to gain days:
+ *     effective end = signed end + total time spent paused.
+ * A key with "excl" (exclusive) removes every other license (refund / downgrade / replace-all).
  */
 
+const crypto = require('crypto');
 const { cleanKeyText, normalizeHardwareId, verifySigned, LICENSE_PREFIX, REPAIR_PREFIX } = require('./licenseFormat');
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -62,14 +72,20 @@ const MAX_VALID_MS = Date.UTC(2100, 0, 1);
 const DIFF_WARN = 2 * DAY; // show a note when the PC date and the POS calendar differ by more than this
 const PERSIST_STEP_MS = 15 * 60 * 1000; // how far T must advance before it is rewritten
 const WARN_BEFORE_DAYS = 7;
+const HW_RETRY_MS = 3 * 60 * 1000; // how often to retry reading the OS machine id after a failed read
+const MAX_PAUSED_MS = 3 * 365 * DAY; // sanity cap on the total paused time of one license (tamper guard)
+const SLOTS = ['premium', 'pro']; // a PC holds at most one license per tier; this is the order they are preferred in
+const keyId = (text) => crypto.createHash('sha256').update(text).digest('hex').slice(0, 12);
+
+const tiers = require('./tiers');
 
 const PLAN_LABELS = { M30: '30-day trial', Y01: '1 year', Y03: '3 years', Y10: '10 years', CUSTOM: 'Custom term' };
 
 const REASON_MESSAGES = {
-  malformed: 'That does not look like a valid license key. Copy the whole key, starting with POS1.',
-  'unknown-key': 'This license was not signed with a key this POS version knows. Contact support.',
-  'bad-signature': 'This license key is not valid (it was changed or is incomplete). Copy it again exactly as sent.',
-  epoch: 'This license is for an older version of the POS. Contact support for a new key.',
+  malformed: 'This is not a valid license key. Copy the full key, starting with POS1.',
+  'unknown-key': 'This key is not recognised by this version. Contact support.',
+  'bad-signature': 'This key is not valid. Copy it again exactly as sent.',
+  epoch: 'This key is for an older version. Ask for a new key.',
 };
 
 function createLicenseManager(o) {
@@ -81,8 +97,15 @@ function createLicenseManager(o) {
   const minEpoch = o.minEpoch || 1;
 
   let hw = { id: '', source: 'file' };
-  let payload = null; // verified license payload (or null)
-  let invalid = null; // { reason, message } when a saved license is rejected
+  let payload = null; // payload of the ACTIVE license (or null) - kept in step with `slots` by sync()
+  const slots = { premium: null, pro: null }; // the wallet: { text, id, payload, off, pausedAt } per tier
+  let activeSlot = null; // which slot is running (it may be an expired one: then the POS is locked)
+  let walletMeta = null; // saved pause bookkeeping, applied once the licenses are loaded
+  let floors = {}; // per tier: keys issued before this moment are void (set by an exclusive key: refund / downgrade)
+  let wv = 0; // wallet version: bumped on every change so the newest saved copy wins
+  let notice = null; // one-line "what just happened" (auto switch), shown on the License tab
+  let dirty = false; // wallet changed since the last write
+  let invalid = null; // { reason, message } when saved licenses are all rejected
   let T = 0; // the POS's own calendar, epoch ms
   let sLast = 0; // PC clock reading at the last observation
   let monoLast = 0; // monotonic reading at the last observation
@@ -90,6 +113,8 @@ function createLicenseManager(o) {
   let persistedT = 0;
   let cached = null;
   let timer = null;
+  let savedText = null; // the licence text found on disk (kept so it can be re-checked)
+  let lastHwRetry = 0;
 
   // ---------- the POS's own calendar ----------
   /** Move T forward to "now". Called every minute, at start-up and before every decision. */
@@ -128,6 +153,13 @@ function createLicenseManager(o) {
       if (!rec || typeof rec !== 'object') continue;
       if (Number.isFinite(rec.lastRepair) && rec.lastRepair >= 0) lastRepair = Math.max(lastRepair, rec.lastRepair);
       if (sane(rec.T) && (!best || rec.T > best.T)) best = { T: rec.T, S: sane(rec.S) ? rec.S : null };
+      const w = rec.w;
+      if (w && typeof w === 'object' && Number.isFinite(w.wv) && (!walletMeta || w.wv > walletMeta.wv)) walletMeta = w;
+    }
+    wv = walletMeta ? walletMeta.wv : 0;
+    floors = {};
+    if (walletMeta && walletMeta.f && typeof walletMeta.f === 'object') {
+      for (const n of SLOTS) if (Number.isFinite(walletMeta.f[n]) && walletMeta.f[n] > 0) floors[n] = walletMeta.f[n];
     }
     monoLast = mono();
     T = best ? best.T : sys; // nothing usable saved: start from the PC clock
@@ -157,13 +189,22 @@ function createLicenseManager(o) {
 
   async function persistClock() {
     persistedT = T;
-    const rec = { T, S: sLast, lastRepair };
+    const s = {};
+    for (const name of SLOTS) {
+      const e = slots[name];
+      if (e) s[name] = { i: e.id, o: e.off, p: e.pausedAt };
+    }
+    const rec = { T, S: sLast, lastRepair, w: { wv, a: activeSlot, s, f: floors } };
+    dirty = false;
     await Promise.all(stores.map((st) => st.write(rec)));
   }
 
   /** The license's issue date is the vendor's real "now": T can never be behind it. */
   function calibrateFromLicense() {
-    if (payload && Number.isFinite(payload.iat)) T = Math.max(T, payload.iat * 1000);
+    for (const name of SLOTS) {
+      const e = slots[name];
+      if (e && Number.isFinite(e.payload.iat)) T = Math.max(T, e.payload.iat * 1000);
+    }
   }
 
   // ---------- license verification ----------
@@ -178,11 +219,167 @@ function createLicenseManager(o) {
       return {
         ok: false,
         reason: 'wrong-machine',
-        message: `This license was issued for a different PC (${p.mid}). This PC's Hardware ID is ${hw.id}. If you replaced the PC or reinstalled Windows, send the new Hardware ID to get a new key.`,
+        message: `This key is for a different PC (${p.mid}). This PC's Hardware ID is ${hw.id}. Send it to us to get a new key.`,
       };
     }
     if ((Number(p.epoch) || 0) < minEpoch) return { ok: false, reason: 'epoch', message: REASON_MESSAGES.epoch };
+    // "tier" is optional (keys issued before tiers existed) but, when present, must be a paid tier.
+    if (p.tier !== undefined && !tiers.ISSUABLE_TIERS.includes(p.tier)) {
+      return { ok: false, reason: 'malformed', message: REASON_MESSAGES.malformed };
+    }
     return { ok: true, payload: p };
+  }
+
+  // ---------- the wallet: several licenses, one active ----------
+  const tierOf = (p) => tiers.normalizeTier(p.tier) || tiers.LEGACY_TIER;
+  const effExp = (e) => e.payload.exp * 1000 + e.off; // signed end + time spent paused
+  /** Milliseconds this license still has. A paused license is frozen at its value on the day it was paused. */
+  const remaining = (e) => (e.pausedAt != null ? effExp(e) - e.pausedAt : effExp(e) - T);
+  const isExpired = (e) => remaining(e) <= 0;
+  const hasAny = () => SLOTS.some((n) => slots[n]);
+  const label = (n) => tiers.TIER_LABELS[n];
+  const daysOf = (ms) => (ms <= 0 ? 0 : Math.max(1, Math.ceil(ms / DAY)));
+
+  function sync() {
+    payload = activeSlot && slots[activeSlot] ? slots[activeSlot].payload : null;
+  }
+
+  /** Total paused time can never exceed what is physically possible for this key. */
+  function clampOffset(e, off) {
+    const sinceIssue = Number.isFinite(e.payload.iat) ? Math.max(0, T - e.payload.iat * 1000) : MAX_PAUSED_MS;
+    return Math.min(Math.max(0, Number(off) || 0), MAX_PAUSED_MS, sinceIssue);
+  }
+
+  /** The licence texts as they are stored: one plain key (readable by older builds) or a small JSON list. */
+  function serializeWallet() {
+    const keys = SLOTS.map((n) => slots[n] && slots[n].text).filter(Boolean);
+    if (keys.length === 0) return '';
+    return keys.length === 1 ? keys[0] : JSON.stringify({ v: 2, keys });
+  }
+  function parseWalletText(text) {
+    const t = String(text || '').trim();
+    if (!t) return [];
+    if (t.startsWith('{')) {
+      try {
+        const j = JSON.parse(t);
+        return Array.isArray(j.keys) ? j.keys.map(cleanKeyText).filter(Boolean) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [cleanKeyText(t)];
+  }
+  async function saveWallet() {
+    if (!o.licenseFiles) return;
+    const text = serializeWallet();
+    if (text) await o.licenseFiles.save(text);
+    else if (o.licenseFiles.clear) await o.licenseFiles.clear();
+  }
+
+  /** Read every saved key; keep the newest valid one per tier. If none is usable, remember why. */
+  function loadWallet(text) {
+    for (const n of SLOTS) slots[n] = null;
+    invalid = null;
+    let firstFail = null;
+    for (const t of parseWalletText(text)) {
+      const r = checkLicenseText(t);
+      if (!r.ok) {
+        firstFail = firstFail || r;
+        continue;
+      }
+      const name = tierOf(r.payload);
+      const cur = slots[name];
+      if (cur && (cur.payload.iat || 0) >= (r.payload.iat || 0)) continue;
+      slots[name] = { text: t, id: keyId(t), payload: r.payload, off: 0, pausedAt: null };
+    }
+    // An exclusive key voids older keys of the other tiers (also remembered across renewals in `floors`).
+    for (const n of SLOTS) {
+      const e = slots[n];
+      if (e && e.payload.excl) for (const other of SLOTS) if (other !== n) floors[other] = Math.max(floors[other] || 0, e.payload.iat || 0);
+    }
+    for (const n of SLOTS) if (slots[n] && (slots[n].payload.iat || 0) < (floors[n] || 0)) slots[n] = null;
+    if (!hasAny() && firstFail) invalid = { reason: firstFail.reason, message: firstFail.message };
+  }
+
+  /** Re-apply the saved pause bookkeeping to the freshly loaded licenses. */
+  function applyWalletMeta() {
+    const m = walletMeta;
+    const saneT = (v) => Number.isFinite(v) && v >= MIN_VALID_MS && v <= MAX_VALID_MS;
+    for (const n of SLOTS) {
+      const e = slots[n];
+      const rec = m && m.s && m.s[n];
+      if (!e || !rec || rec.i !== e.id) continue; // bookkeeping only counts for the very same key
+      e.off = clampOffset(e, rec.o);
+      e.pausedAt = saneT(rec.p) ? Math.min(rec.p, T) : null;
+    }
+    activeSlot = m && typeof m.a === 'string' && slots[m.a] ? m.a : null;
+  }
+
+  /** Exactly one license is running; every other one is paused (its days frozen). */
+  function normalizeWallet() {
+    if (!activeSlot || !slots[activeSlot]) {
+      const usable = SLOTS.find((n) => slots[n] && !isExpired(slots[n]));
+      activeSlot = usable || SLOTS.filter((n) => slots[n]).sort((x, y) => effExp(slots[y]) - effExp(slots[x]))[0] || null;
+    }
+    for (const n of SLOTS) {
+      const e = slots[n];
+      if (!e) continue;
+      if (n === activeSlot) {
+        if (e.pausedAt != null) resumeEntry(e);
+      } else if (e.pausedAt == null) {
+        e.pausedAt = T;
+      }
+    }
+    sync();
+  }
+
+  function resumeEntry(e) {
+    if (e.pausedAt == null) return;
+    e.off = clampOffset(e, e.off + Math.max(0, T - e.pausedAt));
+    e.pausedAt = null;
+  }
+
+  /** Make `name` the running license and pause the current one. */
+  function switchTo(name) {
+    const target = slots[name];
+    const cur = activeSlot && slots[activeSlot];
+    if (cur && cur !== target && cur.pausedAt == null) cur.pausedAt = T;
+    resumeEntry(target);
+    activeSlot = name;
+    wv += 1;
+    dirty = true;
+    sync();
+  }
+
+  /** The running license ended: start the other one (if it still has days). Returns true when it switched. */
+  function fallbackIfEnded() {
+    if (!activeSlot || !slots[activeSlot] || !isExpired(slots[activeSlot])) return false;
+    const alt = SLOTS.find((n) => n !== activeSlot && slots[n] && !isExpired(slots[n]));
+    if (!alt) return false;
+    const from = activeSlot;
+    switchTo(alt);
+    notice = `${label(from)} has ended. ${label(alt)} started (${daysOf(remaining(slots[alt]))} days left).`;
+    return true;
+  }
+
+  function licenseList() {
+    return SLOTS.filter((n) => slots[n]).map((n) => {
+      const e = slots[n];
+      const current = n === activeSlot;
+      const expired = isExpired(e);
+      return {
+        slot: n,
+        tier: n,
+        tierLabel: label(n),
+        plan: e.payload.plan,
+        planLabel: PLAN_LABELS[e.payload.plan] || e.payload.plan,
+        state: expired ? 'expired' : current ? 'active' : 'paused',
+        current,
+        daysLeft: daysOf(remaining(e)),
+        endsOn: current && !expired ? new Date(effExp(e)).toISOString() : null,
+        canUse: !current && !expired,
+      };
+    });
   }
 
   // ---------- status ----------
@@ -201,47 +398,58 @@ function createLicenseManager(o) {
       expiresAt: null,
       daysLeft: null,
       expiringSoon: false,
+      tier: 'free',
+      tierLabel: tiers.TIER_LABELS.free,
+      licensedTier: null,
+      licenses: [],
+      notice,
     };
     if (Math.abs(sys - T) > DIFF_WARN) {
-      base.clockWarning = `The PC date (${new Date(sys).toLocaleDateString()}) differs from the POS's own calendar (${new Date(T).toLocaleDateString()}). The POS keeps working and counts from its own calendar; please check the PC date (and the clock battery).`;
+      base.clockWarning = `The PC date (${new Date(sys).toLocaleDateString()}) differs from the POS calendar (${new Date(T).toLocaleDateString()}). The POS keeps counting from its own calendar. Please check the PC date and the clock battery.`;
     }
 
     if (o.devBypass) {
-      return { ...base, state: 'active', locked: false, plan: 'DEV', planLabel: 'Development (no license check)', message: 'License check is bypassed (development only).', _expMs: Infinity };
+      return { ...base, tier: 'premium', tierLabel: tiers.TIER_LABELS.premium, licensedTier: 'premium', state: 'active', locked: false, plan: 'DEV', planLabel: 'Development (no license check)', message: 'License check is bypassed (development only).', _expMs: Infinity };
     }
     if (publicKeys.length === 0) {
-      return { ...base, state: 'invalid', locked: true, message: 'The license system is not configured in this build (no public key). See docs/LICENSING_GUIDE.md.', _expMs: 0 };
+      return { ...base, state: 'invalid', locked: true, message: 'Licensing is not configured in this build (no public key). See docs/LICENSING_GUIDE.md.', _expMs: 0 };
     }
     if (invalid) {
       return { ...base, state: 'invalid', locked: true, message: invalid.message, _expMs: 0 };
     }
-    if (!payload) {
-      return { ...base, state: 'unlicensed', locked: true, message: 'Enter your license key to unlock the POS. Until then only Settings is available.', _expMs: 0 };
+    const entry = activeSlot && slots[activeSlot];
+    if (!entry) {
+      return { ...base, state: 'unlicensed', locked: true, message: 'Enter your license key to unlock the POS. Only Settings works until then.', _expMs: 0 };
     }
 
-    const expMs = payload.exp * 1000;
+    const expMs = effExp(entry);
+    const licensedTier = activeSlot;
     const detail = {
-      plan: payload.plan,
-      planLabel: PLAN_LABELS[payload.plan] || payload.plan,
-      customer: payload.cust || null,
-      issuedAt: Number.isFinite(payload.iat) ? new Date(payload.iat * 1000).toISOString() : null,
+      licensedTier,
+      licenses: licenseList(),
+      plan: entry.payload.plan,
+      planLabel: PLAN_LABELS[entry.payload.plan] || entry.payload.plan,
+      customer: entry.payload.cust || null,
+      issuedAt: Number.isFinite(entry.payload.iat) ? new Date(entry.payload.iat * 1000).toISOString() : null,
       expiresAt: new Date(expMs).toISOString(),
     };
-    if (T >= expMs) {
+    if (isExpired(entry)) {
       return {
         ...base,
         ...detail,
         state: 'expired',
         locked: true,
         daysLeft: 0,
-        message: 'This license has expired. Enter a new license key to continue. Your data is safe - Settings and Backup stay available. (The POS keeps its own calendar, so changing the PC date does not renew it.)',
+        message: 'This license has expired. Enter a new key. Your data is safe: Settings and Backup still work.',
         _expMs: expMs,
       };
     }
-    const daysLeft = Math.max(1, Math.ceil((expMs - T) / DAY));
+    const daysLeft = daysOf(remaining(entry));
     return {
       ...base,
       ...detail,
+      tier: licensedTier,
+      tierLabel: label(licensedTier),
       state: 'active',
       locked: false,
       daysLeft,
@@ -251,18 +459,48 @@ function createLicenseManager(o) {
     };
   }
 
+  /**
+   * The Hardware ID normally comes from Windows (MachineGuid). If that read failed at
+   * start-up we run on a weaker fallback id, and a valid licence would look like it belongs
+   * to another PC. Never leave the customer locked for the whole session because of one
+   * failed read: look again every few minutes, and re-check the saved licence once Windows answers.
+   */
+  async function retryHardwareId() {
+    if (hw.source !== 'file' || !o.getHardwareId || o.devBypass) return;
+    const t = now();
+    if (t - lastHwRetry < HW_RETRY_MS) return;
+    lastHwRetry = t;
+    try {
+      const again = await o.getHardwareId();
+      if (again && again.id && again.source !== 'file') {
+        hw = again;
+        if (savedText && !hasAny()) {
+          loadWallet(savedText);
+          applyWalletMeta();
+          normalizeWallet();
+        }
+        log('[license] hardware id recovered from the OS');
+      }
+    } catch (err) {
+      log('[license] hardware id retry failed', err);
+    }
+  }
+
   async function refresh() {
+    await retryHardwareId();
     advance();
     await applyEvidence();
     calibrateFromLicense();
-    if (T - persistedT >= PERSIST_STEP_MS) await persistClock();
+    fallbackIfEnded();
+    if (dirty || T - persistedT >= PERSIST_STEP_MS) await persistClock();
     cached = buildStatus();
     return publicStatus(cached);
   }
 
   const publicStatus = (s) => {
     const { _expMs, ...rest } = s;
-    return rest;
+    // The screen gets the full page/feature table so it never has to guess which tier opens what.
+    return { ...rest, pages: tiers.pageAccess(rest.tier), features: tiers.featureAccess(rest.tier) };
   };
 
   // ---------- public API ----------
@@ -270,36 +508,112 @@ function createLicenseManager(o) {
     hw = await o.getHardwareId();
     await loadClockState();
     const text = o.licenseFiles ? await o.licenseFiles.load() : null;
-    if (text) {
-      const r = checkLicenseText(text);
-      if (r.ok) payload = r.payload;
-      else invalid = { reason: r.reason, message: r.message };
-    }
+    savedText = text || null;
+    if (text) loadWallet(text);
+    applyWalletMeta();
     calibrateFromLicense();
+    normalizeWallet();
+    fallbackIfEnded();
     const status = await refresh();
-    await persistClock(); // write the calendar to every store on first run
+    await persistClock(); // write the calendar and the wallet to every store on first run
     return status;
   }
 
-  async function activate(text) {
+  async function activateNow(text) {
     const t = cleanKeyText(text);
     if (!t) throw new Error('Paste the license key first.');
     if (t.startsWith(REPAIR_PREFIX)) return applyRepair(t);
     if (!t.startsWith(LICENSE_PREFIX)) throw new Error('That does not look like a license key. It should start with POS1.');
 
+    lastHwRetry = 0;
+    await retryHardwareId();
     const r = checkLicenseText(t);
     if (!r.ok) throw new Error(r.message);
     advance();
-    if (T >= r.payload.exp * 1000) throw new Error('This license has already expired. Ask for a new key.');
-    // A key issued LATER replaces the current license at once - no gap, no lock.
-    // An OLDER key can never replace a newer one (so a stale key can't be re-entered).
-    if (payload && !invalid && (r.payload.iat || 0) < (payload.iat || 0)) {
-      throw new Error('This key is older than the license already on this PC. Enter the newest key you were sent.');
+    if (T >= r.payload.exp * 1000) throw new Error('This key has already expired. Ask for a new key.');
+
+    const name = tierOf(r.payload);
+    const cur = slots[name];
+    if ((r.payload.iat || 0) < (floors[name] || 0)) {
+      throw new Error('This key is older than your current plan. Enter the newest key.');
     }
-    if (o.licenseFiles) await o.licenseFiles.save(t);
-    payload = r.payload;
+    // A key issued LATER replaces the license of the same tier at once - no gap, no lock.
+    // An OLDER key can never replace a newer one (so a stale key can't be re-entered).
+    if (cur && (r.payload.iat || 0) < (cur.payload.iat || 0)) {
+      throw new Error('This key is older than the one already on this PC. Enter the newest key.');
+    }
+
+    const backup = { slots: { ...slots }, activeSlot, savedText, wv, floors: { ...floors } };
+    const entry = { text: t, id: keyId(t), payload: r.payload, off: 0, pausedAt: null };
+    // Same tier renewed: the paused time already collected carries over (the new key counts from the old end).
+    if (cur && r.payload.exp >= cur.payload.exp) {
+      entry.off = clampOffset(entry, cur.off);
+      entry.pausedAt = cur.pausedAt;
+    }
+    slots[name] = entry;
+
+    // An exclusive key (refund / downgrade / replace-all) removes the other licenses it is newer than.
+    if (r.payload.excl) {
+      for (const other of SLOTS) {
+        if (other === name) continue;
+        floors[other] = Math.max(floors[other] || 0, r.payload.iat || 0);
+        if (slots[other] && (slots[other].payload.iat || 0) <= (r.payload.iat || 0)) slots[other] = null;
+      }
+    }
+
+    const running = activeSlot && slots[activeSlot] && !isExpired(slots[activeSlot]) ? activeSlot : null;
+    if (!running || r.payload.excl) {
+      activeSlot = name; // nothing usable was running: start the new one
+      if (entry.pausedAt != null) resumeEntry(entry);
+    } else if (name === running) {
+      // renewal of the running license: stays active
+    } else if (tiers.RANK[name] > tiers.RANK[running]) {
+      switchTo(name); // upgrade: the new tier starts now, the lower one is paused (its days are kept)
+      notice = `${label(name)} started. Your ${label(running)} days are paused and kept.`;
+    } else {
+      if (entry.pausedAt == null) entry.pausedAt = T; // a lower tier is saved for later; its days wait
+      notice = `${label(name)} license saved. It starts when you choose it or when ${label(running)} ends.`;
+    }
+    wv += 1;
     invalid = null;
+    sync();
+
+    try {
+      savedText = serializeWallet();
+      await saveWallet();
+    } catch (err) {
+      Object.assign(slots, { premium: null, pro: null }, backup.slots);
+      activeSlot = backup.activeSlot;
+      savedText = backup.savedText;
+      wv = backup.wv;
+      floors = backup.floors;
+      sync();
+      throw err;
+    }
     calibrateFromLicense();
+    await persistClock();
+    return refresh();
+  }
+
+  // One activation at a time: two overlapping calls (double click, two windows) must not
+  // let an older key finish last and overwrite a newer one.
+  let activateChain = Promise.resolve();
+  function activate(text) {
+    const run = activateChain.then(() => activateNow(text));
+    activateChain = run.catch(() => {});
+    return run;
+  }
+
+  /** The customer picks which license runs. The running one is paused (its days are kept). */
+  async function useLicense(name) {
+    advance();
+    const target = slots[name];
+    if (!target) throw new Error('That license is not on this PC.');
+    if (name === activeSlot && !isExpired(target)) return refresh();
+    if (isExpired(target)) throw new Error('That license has ended.');
+    const from = activeSlot;
+    switchTo(name);
+    notice = from && slots[from] && from !== name ? `${label(name)} started. ${label(from)} is paused and its days are kept.` : `${label(name)} started.`;
     await persistClock();
     return refresh();
   }
@@ -313,23 +627,63 @@ function createLicenseManager(o) {
     if (normalizeHardwareId(p.mid) !== normalizeHardwareId(hw.id)) throw new Error('This repair code is for a different PC.');
     const tokenNow = p.now * 1000;
     if (Math.abs(now() - tokenNow) > 2 * DAY) {
-      throw new Error('Set the PC date and time correctly first, then enter the repair code again.');
+      throw new Error('Set the PC date and time correctly, then enter the repair code again.');
     }
     if (tokenNow <= lastRepair) throw new Error('This repair code was already used.');
     lastRepair = tokenNow;
+    // A licence whose issue date is later than the vendor's confirmed real date was signed on a PC
+    // with a wrong clock. Its issue date would keep dragging the calendar forward, so remove it
+    // and ask for the corrected key. (Re-entering it is harmless: the calendar is only ever
+    // floored at a key's issue date, exactly as before.)
+    let dropped = false;
+    for (const n of SLOTS) {
+      const e = slots[n];
+      if (e && Number.isFinite(e.payload.iat) && e.payload.iat * 1000 > tokenNow + 2 * DAY) {
+        slots[n] = null;
+        dropped = true;
+      }
+    }
     T = tokenNow;
     sLast = now();
     monoLast = mono();
+    if (dropped) {
+      if (activeSlot && !slots[activeSlot]) activeSlot = null;
+      savedText = serializeWallet() || null;
+      await saveWallet();
+      normalizeWallet();
+      wv += 1;
+    }
     calibrateFromLicense();
     await persistClock();
     return refresh();
   }
 
-  /** Cheap, synchronous - called for every IPC request. */
+  /**
+   * Cheap, synchronous - called for every IPC request. If the running license ended a moment ago
+   * and another one is waiting, switch right here instead of waiting for the next minute tick.
+   */
   function isLocked() {
     if (o.devBypass) return false;
-    if (!cached || cached.state !== 'active') return true;
-    return trustedNow() >= cached._expMs;
+    if (!cached) return true;
+    if (cached.state === 'active' && trustedNow() >= cached._expMs) {
+      advance();
+      fallbackIfEnded();
+      cached = buildStatus();
+    }
+    return cached.state !== 'active' || trustedNow() >= cached._expMs;
+  }
+
+  /**
+   * The tier in force RIGHT NOW. Cheap and synchronous (called for every IPC request).
+   * 'free' whenever the POS is locked, even if a licence is saved (expired/invalid).
+   */
+  function getTier() {
+    if (o.devBypass) return 'premium';
+    if (isLocked()) return 'free';
+    return cached.tier;
+  }
+  function hasTier(need) {
+    return tiers.tierSatisfies(getTier(), need);
   }
 
   function start(everyMs = 60 * 1000) {
@@ -342,26 +696,12 @@ function createLicenseManager(o) {
     timer = null;
   }
 
-  return { init, activate, getStatus: refresh, isLocked, start, stop, flush: persistClock };
+  return { init, activate, useLicense, getStatus: refresh, isLocked, getTier, hasTier, start, stop, flush: persistClock };
 }
 
-/**
- * Channels that still work while the POS is locked: everything the Settings
- * page needs (settings, security lock, printers, Danger Zone, Backup) plus
- * the license screen itself. Everything else is refused in main.js.
- */
+/** Kept for compatibility: channels that work without a licence (the Free tier). See tiers.js. */
 function isChannelAllowedWhenLocked(channel, CH) {
-  const allowed = new Set([
-    CH.SETTINGS_GET_ALL,
-    CH.SETTINGS_SET,
-    CH.PRINTER_LIST_PRINTERS,
-    CH.ORDER_DANGER_COUNT,
-    CH.ORDER_DANGER_DELETE,
-    CH.LICENSE_GET_STATUS,
-    CH.LICENSE_ACTIVATE,
-  ]);
-  if (allowed.has(channel)) return true;
-  return /^(security|backup):/.test(String(channel));
+  return tiers.isFreeChannel(channel, CH);
 }
 
-module.exports = { createLicenseManager, isChannelAllowedWhenLocked, PLAN_LABELS };
+module.exports = { createLicenseManager, isChannelAllowedWhenLocked, PLAN_LABELS, tiers };

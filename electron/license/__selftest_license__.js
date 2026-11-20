@@ -94,7 +94,7 @@ function setup({ clk, orderMs = { v: null }, devBypass = false, stores, files, p
 }
 
 const mint = (over = {}) =>
-  issueLicense({ privateKey: vendor.privateKey, kid: '1', hardwareId: HW, customer: 'A1 Bite', plan: 'Y01', ...over });
+  issueLicense({ privateKey: vendor.privateKey, kid: '1', hardwareId: HW, customer: 'A1 Bite', plan: 'Y01', tier: 'premium', ...over });
 
 (async () => {
   const T0 = Date.UTC(2026, 9, 26, 10, 0, 0); // 26 Oct 2026
@@ -154,8 +154,8 @@ const mint = (over = {}) =>
   });
 
   await test('bad hardware ids and missing customer are refused when issuing', () => {
-    assert.throws(() => issueLicense({ privateKey: vendor.privateKey, hardwareId: 'nope', customer: 'x', plan: 'M30' }), /Hardware ID/);
-    assert.throws(() => issueLicense({ privateKey: vendor.privateKey, hardwareId: HW, customer: ' ', plan: 'M30' }), /name is required/);
+    assert.throws(() => issueLicense({ privateKey: vendor.privateKey, hardwareId: 'nope', customer: 'x', plan: 'M30', tier: 'pro' }), /Hardware ID/);
+    assert.throws(() => issueLicense({ privateKey: vendor.privateKey, hardwareId: HW, customer: ' ', plan: 'M30', tier: 'pro' }), /name is required/);
   });
 
   // ----------------------------------------------------------- activation
@@ -252,7 +252,7 @@ const mint = (over = {}) =>
     await mgr.init();
     await mgr.activate(mint({ plan: 'Y03', now: new Date(T0) }).key);
     const stale = mint({ plan: 'Y10', now: new Date(T0 - 5 * DAY) }).key;
-    await assert.rejects(() => mgr.activate(stale), /older than the license already on this PC/);
+    await assert.rejects(() => mgr.activate(stale), /older than the one already on this PC/);
     const corrected = await mgr.activate(mint({ plan: 'Y01', now: new Date(T0 + 1 * DAY) }).key);
     assert.strictEqual(corrected.plan, 'Y01');
   });
@@ -610,7 +610,7 @@ const mint = (over = {}) =>
     const script = path.join(__dirname, '..', '..', 'tools', 'license', 'issue-license.js');
     const env = { ...process.env, LICENSE_PASSPHRASE: pass };
 
-    const lic = spawnSync(process.execPath, [script, '--dir', dir, '--machine', HW, '--customer', 'Cafe "Quote" Test', '--plan', 'Y03'], { env, encoding: 'utf8' });
+    const lic = spawnSync(process.execPath, [script, '--dir', dir, '--machine', HW, '--customer', 'Cafe "Quote" Test', '--plan', 'Y03', '--tier', 'premium'], { env, encoding: 'utf8' });
     assert.strictEqual(lic.status, 0, lic.stderr);
     const key = lic.stdout.split('\n').find((l) => l.startsWith(LICENSE_PREFIX));
     const v = verifySigned(key, 'license', PUBLIC_KEYS);
@@ -619,7 +619,7 @@ const mint = (over = {}) =>
     assert.strictEqual(v.payload.cust, 'Cafe "Quote" Test');
 
     // renewal: --renew finds the current expiry in the record and keeps unused days
-    const renew = spawnSync(process.execPath, [script, '--dir', dir, '--machine', HW, '--customer', 'Cafe "Quote" Test', '--plan', 'Y01', '--renew'], { env, encoding: 'utf8' });
+    const renew = spawnSync(process.execPath, [script, '--dir', dir, '--machine', HW, '--customer', 'Cafe "Quote" Test', '--plan', 'Y01', '--tier', 'premium', '--renew'], { env, encoding: 'utf8' });
     assert.strictEqual(renew.status, 0, renew.stderr);
     assert.ok(/Renewal: the current license for this PC ends/.test(renew.stdout));
     const renewed = verifySigned(renew.stdout.split('\n').find((l) => l.startsWith(LICENSE_PREFIX)), 'license', PUBLIC_KEYS).payload;
@@ -632,7 +632,7 @@ const mint = (over = {}) =>
     const csv = fs.readFileSync(path.join(dir, 'issued-licenses.csv'), 'utf8').trim().split('\n');
     assert.strictEqual(csv.length, 4, 'header + 3 records');
 
-    const bad = spawnSync(process.execPath, [script, '--dir', dir, '--machine', HW, '--customer', 'x', '--plan', 'Y01'], { env: { ...process.env, LICENSE_PASSPHRASE: 'wrong passphrase!!' }, encoding: 'utf8' });
+    const bad = spawnSync(process.execPath, [script, '--dir', dir, '--machine', HW, '--customer', 'x', '--plan', 'Y01', '--tier', 'pro'], { env: { ...process.env, LICENSE_PASSPHRASE: 'wrong passphrase!!' }, encoding: 'utf8' });
     assert.notStrictEqual(bad.status, 0);
     assert.ok(/wrong passphrase/.test(bad.stderr));
     assert.ok(loadPrivateKey(priv, pass));

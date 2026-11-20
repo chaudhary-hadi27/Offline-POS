@@ -982,7 +982,7 @@ export function renderMenuSetup() {
       }
 
       removeBtn.addEventListener('click', async () => {
-        if (!window.confirm(`Remove "${img.label}" from the gallery? This won't affect any item already using it.`)) return;
+        if (!(await confirmAction({ title: 'Remove photo?', message: `Remove "${img.label}" from the gallery? Items already using it are not affected.`, confirmLabel: 'Remove' }))) return;
         try {
           await posApi.customGallery.remove(img.filename);
           closeSub();
@@ -1102,7 +1102,7 @@ export function renderMenuSetup() {
           closeSub();
           return;
         }
-        if (!window.confirm(`Delete ${customImages.length} saved photo${customImages.length === 1 ? '' : 's'} in "${category}"? This won't affect any item already using them.`)) return;
+        if (!(await confirmAction({ title: 'Delete photos?', message: `Delete ${customImages.length} saved photo${customImages.length === 1 ? '' : 's'} in "${category}"? Items already using them are not affected.`, confirmLabel: 'Delete' }))) return;
         deleteBtn.disabled = true;
         try {
           for (const img of customImages) {
@@ -1618,7 +1618,7 @@ export function renderMenuSetup() {
             }
 
             // Second, final confirmation - the picker above is step one.
-            if (!window.confirm(message)) return;
+            if (!(await confirmAction({ title: 'Are you sure?', message, confirmLabel: mode === 'delete-items' ? 'Delete' : 'Move', tone: mode === 'delete-items' ? 'danger' : 'default' }))) return;
 
             try {
               const result = await posApi.items.deleteCategory(cat, options);

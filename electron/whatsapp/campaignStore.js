@@ -107,6 +107,14 @@ function init(userDataDir) {
       if (state && state.runState === 'running') {
         state.runState = 'stopped';
         state.nextGroupAt = null;
+        // The app closed (or crashed) while a message was being sent: nobody knows if it was delivered.
+        // Never send it again on our own - mark it "uncertain" and let the owner decide.
+        for (const c of (state.groups || []).flat()) {
+          if (c.status === 'sending') {
+            c.status = 'uncertain';
+            c.error = 'The app closed while sending. It may or may not have been delivered.';
+          }
+        }
         persistNow();
       }
     }
@@ -191,6 +199,43 @@ function setContactStatus(groupIndex, contactId, status, error = null) {
   schedulePersist();
 }
 
+/** Contacts whose delivery is unknown because the app closed in the middle of sending them. */
+function getUncertainContacts() {
+  if (!state) return [];
+  return state.groups.flat().filter((c) => c.status === 'uncertain');
+}
+
+/**
+ * The owner's decision about the unsure contacts: 'resend' (they go back in the queue and the
+ * cursor moves back to the first of them) or 'skip' (kept in the Failed list with a clear note,
+ * so "Retry failed" can still send them later). Returns how many were affected.
+ */
+function resolveUncertain(action) {
+  if (!state || (action !== 'resend' && action !== 'skip')) return 0;
+  let count = 0;
+  let first = null;
+  state.groups.forEach((group, g) => {
+    group.forEach((c, i) => {
+      if (c.status !== 'uncertain') return;
+      count += 1;
+      if (!first) first = { g, i };
+      if (action === 'resend') {
+        c.status = 'pending';
+        c.error = null;
+      } else {
+        c.status = 'failed';
+        c.error = 'Skipped: not sure if it was delivered.';
+      }
+    });
+  });
+  if (action === 'resend' && first && (first.g < state.currentGroupIndex || (first.g === state.currentGroupIndex && first.i < state.currentContactIndex))) {
+    state.currentGroupIndex = first.g;
+    state.currentContactIndex = first.i;
+  }
+  if (count > 0) persistNow();
+  return count;
+}
+
 /** Flat list of every failed contact across every group, for the Retry Failed button. */
 function getFailedContacts() {
   if (!state) return [];
@@ -232,6 +277,8 @@ module.exports = {
   setNextGroupAt,
   setContactStatus,
   getFailedContacts,
+  getUncertainContacts,
+  resolveUncertain,
   requeueFailed,
   flush,
 };

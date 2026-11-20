@@ -16,6 +16,7 @@ const {
   normalizeHardwareId,
   formatHardwareId,
 } = require('../../electron/license/licenseFormat');
+const { ISSUABLE_TIERS, TIER_LABELS, LEGACY_TIER } = require('../../electron/license/tiers');
 
 /** plan code -> how long it runs from the start date */
 const PLANS = {
@@ -84,14 +85,18 @@ function loadPrivateKey(pemText, passphrase) {
 }
 
 /** @returns {{key:string, payload:object}} */
-function issueLicense({ privateKey, kid = '1', hardwareId, customer, plan, from, expires, epoch = 1, now = new Date() }) {
+function issueLicense({ privateKey, kid = '1', hardwareId, customer, plan, tier, exclusive = false, from, expires, epoch = 1, now = new Date() }) {
   if (!customer || !String(customer).trim()) throw new Error('Customer / restaurant name is required.');
+  // The tier is chosen on purpose every time - there is no default, so a key is never silently too generous or too small.
+  if (!ISSUABLE_TIERS.includes(tier)) throw new Error(`Tier is required: ${ISSUABLE_TIERS.join(' or ')} (got "${tier ?? ''}").`);
   const payload = {
     v: 1,
     kid: String(kid),
     mid: toHardwareId(hardwareId),
     plan,
-    cust: String(customer).trim(),
+    tier,
+    ...(exclusive ? { excl: 1 } : {}),
+    cust: String(customer).replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim(),
     iat: Math.floor(now.getTime() / 1000),
     exp: computeExpirySeconds({ plan, from: from || now, expires }),
     epoch,
@@ -110,17 +115,68 @@ function issueRepair({ privateKey, kid = '1', hardwareId, now = new Date() }) {
  * returns its expiry as "YYYY-MM-DD" (or null). Used by `--renew` so you never have to
  * remember when a customer's current license ends.
  */
-function readLastExpiry(csvText, hardwareId) {
+function readLastExpiry(csvText, hardwareId, tier = null) {
   const wanted = normalizeHardwareId(hardwareId);
   let found = null;
   for (const line of String(csvText || '').split('\n').slice(1)) {
     const cells = [...line.matchAll(/"((?:[^"]|"")*)"/g)].map((m) => m[1].replace(/""/g, '"'));
-    // issued_at,type,customer,hardware_id,plan,expires,kid,key
+    // issued_at,type,customer,hardware_id,plan,expires,kid,key,tier
     if (cells.length < 6 || cells[1] !== 'license') continue;
     if (normalizeHardwareId(cells[3]) !== wanted || !cells[5]) continue;
+    // each tier is a separate license on the PC, so renew from the end of the SAME tier (old rows have no tier = LEGACY_TIER)
+    if (tier && (cells[8] || LEGACY_TIER) !== tier) continue;
     if (!found || cells[0] >= found.issuedAt) found = { issuedAt: cells[0], expires: cells[5] };
   }
   return found ? found.expires : null;
 }
 
-module.exports = { readLastExpiry, PLANS, computeExpirySeconds, issueLicense, issueRepair, loadPrivateKey, toHardwareId, parseYmd, ymd };
+/** The tier of the newest LICENSE issued to this Hardware ID (or null) - the default offered on renewal. */
+function readLastTier(csvText, hardwareId) {
+  const wanted = normalizeHardwareId(hardwareId);
+  let found = null;
+  for (const line of String(csvText || '').split('\n').slice(1)) {
+    const cells = [...line.matchAll(/"((?:[^"]|"")*)"/g)].map((m) => m[1].replace(/""/g, '"'));
+    if (cells.length < 9 || cells[1] !== 'license' || normalizeHardwareId(cells[3]) !== wanted) continue;
+    if (ISSUABLE_TIERS.includes(cells[8]) && (!found || cells[0] >= found.issuedAt)) found = { issuedAt: cells[0], tier: cells[8] };
+  }
+  return found ? found.tier : null;
+}
+
+/** Newest issued_at in the CSV record (epoch ms) or null. */
+function readLastIssuedAtMs(csvText) {
+  let newest = null;
+  for (const line of String(csvText || '').split('\n').slice(1)) {
+    const m = /^"((?:[^"]|"")*)"/.exec(line);
+    if (!m) continue;
+    const t = Date.parse(m[1]);
+    if (Number.isFinite(t) && (newest === null || t > newest)) newest = t;
+  }
+  return newest;
+}
+
+const CLOCK_SKEW_LIMIT_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A key's issue date (iat) becomes the customer POS's calendar floor, so signing with a wrong PC
+ * date damages the customer. Refuse to sign when this PC's date is not plausible.
+ * @returns {{ok:boolean, problems:string[], warnings:string[]}}
+ */
+function checkVendorClock({ nowMs, onlineNowMs = null, csvText = '' }) {
+  const problems = [];
+  const warnings = [];
+  if (Number.isFinite(onlineNowMs)) {
+    const d = nowMs - onlineNowMs;
+    if (Math.abs(d) > CLOCK_SKEW_LIMIT_MS) {
+      problems.push(`This PC's date is ${Math.round(Math.abs(d) / 86400000)} day(s) ${d > 0 ? 'ahead of' : 'behind'} the real date (internet time). Fix the PC date and try again.`);
+    }
+  } else {
+    warnings.push('Could not check the date against internet time (offline?). Double-check this PC\'s date before sending the key.');
+  }
+  const last = readLastIssuedAtMs(csvText);
+  if (last !== null && nowMs < last - 5 * 60 * 1000) {
+    problems.push(`This PC's date is earlier than the last license you issued (${new Date(last).toISOString().slice(0, 10)}). The PC clock is probably wrong.`);
+  }
+  return { ok: problems.length === 0, problems, warnings };
+}
+
+module.exports = { readLastTier, TIER_LABELS, readLastIssuedAtMs, checkVendorClock, CLOCK_SKEW_LIMIT_MS, readLastExpiry, PLANS, computeExpirySeconds, issueLicense, issueRepair, loadPrivateKey, toHardwareId, parseYmd, ymd };

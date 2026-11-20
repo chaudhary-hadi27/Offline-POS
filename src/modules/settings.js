@@ -4,10 +4,12 @@ import { posApi } from '../shell/posApi.js';
 import { iconMarkup } from '../shell/icons.js';
 import { attachRipple, attachRippleAll } from '../shell/ripple.js';
 import { toaster } from '../shell/toast.js';
+import { confirmAction } from '../shell/confirmDialog.js';
 import { patternSvgMarkup, wirePatternEvents, PATTERN_MIN_LENGTH } from '../shell/patternLock.js';
 import { getBusinessDayStart, formatLocal, businessRangeFromDates } from '../shell/businessDay.js';
 import { createBackupPanel, relativeTime } from '../shell/backupPanel.js';
-import { refreshLicense } from '../shell/license.js';
+import { refreshLicense, featureAccess, tierLabel, tierPillMarkup } from '../shell/license.js';
+import { SAFE, LIMITS, KEYS as WA, RISK_WARNING, PROFILES, DEFAULT_PROFILE_INDEX, profileIndexOf, isRisky, estimateMinutes, formatMinutes, validate as validateTiming } from '../shell/whatsappTiming.js';
 
 // Settings > Printer > Item names on receipt. Printing itself is handled in
 // electron/print/receiptTemplate.js (receiptLanguage()).
@@ -38,6 +40,7 @@ const TABS = [
   { key: 'schedule', label: 'Business Day', icon: 'clock' },
   { key: 'restaurant', label: 'Restaurant & Receipt', icon: 'settings' },
   { key: 'printer', label: 'Printer', icon: 'print' },
+  { key: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp' },
   { key: 'lock', label: 'Security Lock', icon: 'lock' },
   { key: 'danger', label: 'Danger Zone', icon: 'alertTriangle', danger: true },
 ];
@@ -80,6 +83,7 @@ export function renderSettings() {
         <div id="schedule-card" data-panel="schedule" class="hidden"></div>
         <div id="info-card" data-panel="restaurant" class="hidden"></div>
         <div id="printer-card" data-panel="printer" class="hidden"></div>
+        <div id="whatsapp-card" data-panel="whatsapp" class="hidden"></div>
         <div id="lock-card" data-panel="lock" class="hidden"></div>
         <div id="danger-card" data-panel="danger" class="hidden"></div>
       </div>
@@ -103,6 +107,7 @@ export function renderSettings() {
     renderScheduleCard(settings);
     renderInfoCard(settings);
     renderPrinterCard(settings);
+    renderWhatsappCard(settings);
     renderLockCard(lockConfigured, lockType);
     renderDangerZoneCard(settings);
     renderTabs();
@@ -161,6 +166,58 @@ export function renderSettings() {
   }
 
   // ---------------- License ----------------
+  /** "What your license includes": every page with a tick, or a lock + the tier that opens it. */
+  function renderIncludedPages(status) {
+    const pages = status && status.pages ? Object.values(status.pages) : [];
+    if (pages.length === 0) return '';
+    const items = pages
+      .map(
+        (p) => `<li class="flex items-center gap-2 text-sm ${p.allowed ? 'text-ink' : 'text-ink-muted'}">
+          <span class="h-4 w-4 flex-shrink-0 ${p.allowed ? 'text-accent' : 'text-ink-muted'}">${iconMarkup(p.allowed ? 'check' : 'lock')}</span>
+          <span>${esc(p.title)}</span>${p.allowed ? '' : tierPillMarkup(p.required)}
+        </li>`
+      )
+      .join('');
+    return `<div class="mb-5">
+      <span class="mb-1.5 block text-sm font-medium text-ink-secondary">Included in your license</span>
+      <ul class="grid grid-cols-1 gap-1.5 sm:grid-cols-2">${items}</ul>
+      <p class="mt-2 text-xs text-ink-muted">Free = Settings only &middot; Pro = every page except WhatsApp Deals &middot; Premium = everything.</p>
+    </div>`;
+  }
+
+  /** "Your licenses": every license on this PC with its state; a paused one can be started (the running one is paused). */
+  function renderWalletList(status) {
+    const list = status.licenses || [];
+    if (list.length === 0) return '';
+    const stateText = (l) =>
+      l.state === 'active'
+        ? `Running &middot; ${l.daysLeft} day${l.daysLeft === 1 ? '' : 's'} left`
+        : l.state === 'paused'
+          ? `Paused &middot; ${l.daysLeft} day${l.daysLeft === 1 ? '' : 's'} kept`
+          : 'Ended';
+    const rows = list
+      .map(
+        (l) => `<li class="flex flex-wrap items-center justify-between gap-3 rounded-xl border ${l.current && l.state !== 'expired' ? 'border-accent/40 bg-accent/5' : 'border-border'} px-4 py-3">
+          <div>
+            <p class="text-sm font-semibold text-ink">${esc(l.tierLabel)} <span class="font-normal text-ink-secondary">&middot; ${esc(l.planLabel || '')}</span></p>
+            <p class="text-xs ${l.state === 'expired' ? 'text-red-600' : 'text-ink-secondary'}">${stateText(l)}</p>
+          </div>
+          ${
+            l.canUse
+              ? `<button type="button" data-use-license="${esc(l.slot)}" class="use-license-btn ripple-host rounded-xl border border-accent px-3.5 py-2 text-sm font-medium text-accent hover:bg-accent hover:text-white">Use this</button>`
+              : ''
+          }
+        </li>`
+      )
+      .join('');
+    return `<div class="mb-5">
+      <span class="mb-1.5 block text-sm font-medium text-ink-secondary">Your licenses</span>
+      <ul class="flex flex-col gap-2">${rows}</ul>
+      ${list.length > 1 ? '<p class="mt-2 text-xs text-ink-muted">Only one runs at a time. The other is paused and its days are kept.</p>' : ''}
+      ${status.notice ? `<p class="mt-2 text-xs font-medium text-accent">${esc(status.notice)}</p>` : ''}
+    </div>`;
+  }
+
   function renderLicenseCard(status) {
     const container = root.querySelector('#license-card');
     if (!status) {
@@ -178,6 +235,7 @@ export function renderSettings() {
     const rows =
       status.state === 'active' || status.state === 'expired'
         ? `<dl class="mb-5 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+             <dt class="text-ink-secondary">Tier</dt><dd class="font-medium text-ink">${esc(status.state === 'expired' ? `${tierLabel(status.licensedTier)} (expired)` : status.tierLabel || tierLabel(status.tier))}</dd>
              <dt class="text-ink-secondary">Plan</dt><dd class="font-medium text-ink">${esc(status.planLabel || status.plan || '-')}</dd>
              <dt class="text-ink-secondary">Licensed to</dt><dd class="font-medium text-ink">${esc(status.customer || '-')}</dd>
              <dt class="text-ink-secondary">Expires</dt><dd class="font-medium text-ink">${fmtDate(status.expiresAt)}${
@@ -194,6 +252,8 @@ export function renderSettings() {
         <span class="text-sm text-ink-secondary">${esc(status.message)}</span>
       </div>
       ${rows}
+      ${renderWalletList(status)}
+      ${renderIncludedPages(status)}
       ${status.clockWarning ? `<p class="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">${esc(status.clockWarning)}</p>` : ''}
 
       <div class="mb-5">
@@ -202,16 +262,17 @@ export function renderSettings() {
           <code id="hw-id" class="rounded-xl border border-border bg-surface-raised px-4 py-2.5 font-nums text-base font-semibold tracking-wider text-ink">${esc(status.hardwareId)}</code>
           <button type="button" id="copy-hw-btn" class="ripple-host rounded-xl border border-border px-3.5 py-2.5 text-sm font-medium text-ink-secondary hover:border-accent/30 hover:text-accent">Copy</button>
         </div>
-        <p class="mt-1.5 text-xs text-ink-muted">Send this ID to get your license key. A key only works on the PC it was made for.${
-          status.hardwareIdSource === 'file' ? ' Note: this PC could not provide a permanent ID, so reinstalling the POS may change it.' : ''
+        <p class="mt-1.5 text-xs text-ink-muted">Send this ID to get your key. A key works only on this PC.${
+          status.hardwareIdSource === 'file' ? ' This PC has no permanent ID, so reinstalling may change it.' : ''
         }</p>
       </div>
 
       <label class="flex flex-col gap-1.5 text-sm">
-        <span class="font-medium text-ink-secondary">${status.state === 'active' ? 'Renew / replace license key (or enter a repair code)' : 'License key (or repair code)'}</span>
+        <span class="font-medium text-ink-secondary">${status.licenses && status.licenses.length ? 'Add or renew a license key (or a repair code)' : 'License key (or repair code)'}</span>
         <textarea id="license-input" rows="4" spellcheck="false" placeholder="POS1...."
           class="break-all rounded-xl border border-border px-3.5 py-2.5 font-mono text-xs focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"></textarea>
       </label>
+      <p class="mt-1.5 text-xs text-ink-muted">A higher license starts at once and pauses the lower one. Its days are kept.</p>
       <button type="button" id="activate-btn" class="ripple-host mt-4 rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-hover">Activate</button>
       `,
       'lock'
@@ -231,6 +292,22 @@ export function renderSettings() {
       toaster.success('Hardware ID copied.');
     });
 
+    container.querySelectorAll('.use-license-btn').forEach((btn) => {
+      attachRipple(btn);
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          const next = await posApi.license.use(btn.dataset.useLicense);
+          await refreshLicense();
+          toaster.success(next.notice || 'Switched.');
+          renderLicenseCard(next);
+        } catch (err) {
+          toaster.error(err.message);
+          btn.disabled = false;
+        }
+      });
+    });
+
     const activateBtn = container.querySelector('#activate-btn');
     attachRipple(activateBtn);
     activateBtn.addEventListener('click', async () => {
@@ -240,7 +317,7 @@ export function renderSettings() {
         const wasLocked = status.locked;
         const next = await posApi.license.activate(input.value);
         await refreshLicense();
-        toaster.success(wasLocked && !next.locked ? 'License activated - the POS is unlocked.' : 'Saved.');
+        toaster.success(wasLocked && !next.locked ? 'License activated. The POS is unlocked.' : next.notice || 'Saved.');
         renderLicenseCard(next);
       } catch (err) {
         toaster.error(err.message);
@@ -248,6 +325,239 @@ export function renderSettings() {
         activateBtn.disabled = false;
       }
     });
+  }
+
+  // ---------------- WhatsApp sending speed ----------------
+  function renderWhatsappCard(settings) {
+    const container = root.querySelector('#whatsapp-card');
+    const allowed = featureAccess('whatsapp-timing');
+    if (!allowed.allowed) {
+      container.innerHTML = card(
+        'WhatsApp sending speed',
+        `<div class="flex items-start gap-3 rounded-xl border border-border bg-surface-raised px-4 py-4">
+           <span class="mt-0.5 h-5 w-5 flex-shrink-0 text-ink-muted">${iconMarkup('lock')}</span>
+           <div class="text-sm text-ink-secondary">
+             <p class="mb-1 font-medium text-ink">WhatsApp Deals is a Premium feature ${tierPillMarkup('premium', 'ml-1')}</p>
+             <p>Upgrade to Premium to use WhatsApp Deals and change its speed.</p>
+           </div>
+         </div>`,
+        'whatsapp'
+      );
+      return;
+    }
+
+    const num = (key, fallback) => (/^\d+$/.test(String(settings[key] ?? '').trim()) ? parseInt(settings[key], 10) : fallback);
+    const def = PROFILES[DEFAULT_PROFILE_INDEX];
+    let customOn = String(settings[WA.custom]) === '1';
+    const vals = {
+      contactMin: num(WA.contactMin, def.contactMin),
+      contactMax: num(WA.contactMax, def.contactMax),
+      groupMin: num(WA.groupMin, def.groupMin),
+      groupMax: num(WA.groupMax, def.groupMax),
+    };
+    let accepted = false; // the risk box starts unticked on every visit - a new, faster setting needs a fresh confirmation
+    let advancedOpen = profileIndexOf(vals) === -1 && customOn; // exact numbers that match no stop open the Advanced box
+
+    const field = (id, label, value, range, unit) => `
+      <label class="flex flex-col gap-1 text-sm">
+        <span class="text-ink-secondary">${label}</span>
+        <span class="flex items-center gap-2">
+          <input id="${id}" type="number" inputmode="numeric" min="${range.min}" max="${range.max}" step="1" value="${value}"
+            class="w-24 rounded-xl border border-border px-3 py-2 text-right font-nums focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
+          <span class="text-xs text-ink-muted">${unit}</span>
+        </span>
+      </label>`;
+
+    const summaryText = (v) => `${v.contactMin}&ndash;${v.contactMax} seconds between customers &middot; ${v.groupMin}&ndash;${v.groupMax} minutes between groups`;
+
+    function draw() {
+      const { track, knob } = toggleClasses(customOn);
+      const idx = profileIndexOf(vals);
+      const risky = customOn && isRisky(vals);
+      const err = customOn ? validateTiming(vals) : null;
+      const eff = customOn ? vals : PROFILES[DEFAULT_PROFILE_INDEX];
+      const canSave = !err && (!risky || accepted);
+      const sliderIdx = idx === -1 ? DEFAULT_PROFILE_INDEX : idx;
+      const label = idx === -1 ? 'Custom' : PROFILES[idx].label;
+      const note = idx === -1 ? 'Your own numbers (Advanced).' : PROFILES[idx].note;
+      const safeShare = ((DEFAULT_PROFILE_INDEX + 0.5) / PROFILES.length) * 100; // where the green zone ends
+
+      const sliderBlock = `
+        <div class="mb-4 rounded-xl border border-border p-4">
+          <div class="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-wide text-ink-muted">Sending speed</p>
+              <p id="wa-profile-label" class="text-lg font-semibold ${risky ? 'text-red-600' : 'text-ink'}">${label}${idx === DEFAULT_PROFILE_INDEX ? ' <span class="ml-1 rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">Recommended</span>' : ''}</p>
+              <p id="wa-profile-note" class="text-xs text-ink-secondary">${note}</p>
+            </div>
+            <p id="wa-profile-summary" class="max-w-[14rem] text-right text-xs text-ink-secondary">${summaryText(vals)}</p>
+          </div>
+          <div class="relative px-1">
+            <div class="pointer-events-none absolute left-1 right-1 top-1/2 h-2 -translate-y-1/2 overflow-hidden rounded-full">
+              <div class="h-full w-full" style="background: linear-gradient(to right, #16a34a 0%, #16a34a ${safeShare}%, #f59e0b ${safeShare}%, #dc2626 100%)"></div>
+            </div>
+            <input id="wa-speed" type="range" min="0" max="${PROFILES.length - 1}" step="1" value="${sliderIdx}" aria-label="WhatsApp sending speed"
+              class="relative z-10 h-6 w-full cursor-pointer appearance-none bg-transparent accent-white" />
+          </div>
+          <div class="mt-1 flex justify-between px-1 text-[10px] text-ink-muted">
+            <span>Slower &middot; safer</span><span>Faster &middot; riskier</span>
+          </div>
+        </div>
+        <div class="mb-4">
+          <button type="button" id="wa-advanced-toggle" class="text-sm font-medium text-accent hover:underline">${advancedOpen ? 'Hide' : 'Advanced:'} ${advancedOpen ? 'exact numbers' : 'type exact numbers'}</button>
+          ${
+            advancedOpen
+              ? `<div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                   <div class="rounded-xl border border-border p-4">
+                     <p class="mb-3 text-sm font-medium text-ink">Between customers</p>
+                     <div class="flex flex-wrap gap-4">
+                       ${field('wa-c-min', 'Shortest', vals.contactMin, LIMITS.contact, 'seconds')}
+                       ${field('wa-c-max', 'Longest', vals.contactMax, LIMITS.contact, 'seconds')}
+                     </div>
+                   </div>
+                   <div class="rounded-xl border border-border p-4">
+                     <p class="mb-3 text-sm font-medium text-ink">Between groups of 15</p>
+                     <div class="flex flex-wrap gap-4">
+                       ${field('wa-g-min', 'Shortest', vals.groupMin, LIMITS.group, 'minutes')}
+                       ${field('wa-g-max', 'Longest', vals.groupMax, LIMITS.group, 'minutes')}
+                     </div>
+                   </div>
+                 </div>`
+              : ''
+          }
+        </div>
+        ${err ? `<p class="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">${esc(err)}</p>` : ''}
+        ${
+          risky && !err
+            ? `<div class="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+                 <p class="mb-2 flex items-center gap-2 font-semibold"><span class="h-4 w-4">${iconMarkup('alertTriangle')}</span>Risky speed</p>
+                 <p class="mb-3">${esc(RISK_WARNING)}</p>
+                 <label class="flex items-start gap-2 font-medium">
+                   <input id="wa-accept" type="checkbox" class="mt-0.5 h-4 w-4" ${accepted ? 'checked' : ''} />
+                   <span>I accept the risk.</span>
+                 </label>
+               </div>`
+            : ''
+        }`;
+
+      container.innerHTML = card(
+        'WhatsApp sending speed',
+        `
+        <div class="mb-4 flex items-center justify-between gap-4 rounded-xl border border-border px-4 py-3">
+          <div>
+            <p class="text-sm font-medium text-ink">Adjust sending speed</p>
+            <p class="text-xs text-ink-secondary">Off = always the Optimized speed.</p>
+          </div>
+          <button type="button" id="wa-custom-toggle" role="switch" aria-checked="${customOn}" class="${track}"><span class="${knob}"></span></button>
+        </div>
+
+        ${customOn ? sliderBlock : `<p class="mb-3 text-xs text-ink-muted">Recommended: ${summaryText(def)}.</p>`}
+
+        <p class="mb-4 text-xs text-ink-secondary">For 100 customers this takes about <span class="font-semibold text-ink">${formatMinutes(estimateMinutes(100, eff))}</span>.</p>
+
+        <div class="flex flex-wrap gap-2">
+          <button type="button" id="wa-save" ${canSave ? '' : 'disabled'}
+            class="ripple-host rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50">Save</button>
+          ${
+            customOn
+              ? `<button type="button" id="wa-reset" class="ripple-host rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-ink-secondary hover:border-accent/30 hover:text-accent">Back to Optimized</button>`
+              : ''
+          }
+        </div>`,
+        'whatsapp'
+      );
+
+      const read = () => {
+        const g = (id) => parseInt(container.querySelector(id)?.value ?? '', 10);
+        vals.contactMin = g('#wa-c-min');
+        vals.contactMax = g('#wa-c-max');
+        vals.groupMin = g('#wa-g-min');
+        vals.groupMax = g('#wa-g-max');
+      };
+
+      container.querySelector('#wa-custom-toggle').addEventListener('click', () => {
+        customOn = !customOn;
+        accepted = false;
+        draw();
+      });
+
+      // The slider: moving it fills in all four numbers from the stop. "input" only refreshes the text while
+      // dragging; "change" (release / arrow key) redraws, so the warning box appears without interrupting the drag.
+      const slider = container.querySelector('#wa-speed');
+      if (slider) {
+        const apply = (i) => {
+          const p = PROFILES[i];
+          vals.contactMin = p.contactMin;
+          vals.contactMax = p.contactMax;
+          vals.groupMin = p.groupMin;
+          vals.groupMax = p.groupMax;
+        };
+        slider.addEventListener('input', () => {
+          const i = parseInt(slider.value, 10);
+          apply(i);
+          const labelEl = container.querySelector('#wa-profile-label');
+          labelEl.textContent = PROFILES[i].label;
+          labelEl.classList.toggle('text-red-600', isRisky(vals));
+          container.querySelector('#wa-profile-note').textContent = PROFILES[i].note;
+          container.querySelector('#wa-profile-summary').innerHTML = summaryText(vals);
+        });
+        slider.addEventListener('change', () => {
+          apply(parseInt(slider.value, 10));
+          accepted = false; // any new speed needs a fresh confirmation
+          draw();
+        });
+      }
+      container.querySelector('#wa-advanced-toggle')?.addEventListener('click', () => {
+        if (advancedOpen) read();
+        advancedOpen = !advancedOpen;
+        draw();
+      });
+      ['#wa-c-min', '#wa-c-max', '#wa-g-min', '#wa-g-max'].forEach((sel) => {
+        // re-draw on "change" (not every keystroke) so typing a number is never interrupted
+        container.querySelector(sel)?.addEventListener('change', () => {
+          read();
+          accepted = false;
+          draw();
+        });
+      });
+      container.querySelector('#wa-accept')?.addEventListener('change', (e) => {
+        accepted = e.target.checked;
+        draw();
+      });
+      container.querySelector('#wa-reset')?.addEventListener('click', () => {
+        Object.assign(vals, { contactMin: def.contactMin, contactMax: def.contactMax, groupMin: def.groupMin, groupMax: def.groupMax });
+        accepted = false;
+        advancedOpen = false;
+        draw();
+      });
+      const saveBtn = container.querySelector('#wa-save');
+      attachRipple(saveBtn);
+      saveBtn.addEventListener('click', async () => {
+        if (customOn && advancedOpen) read();
+        saveBtn.disabled = true;
+        try {
+          const entries = customOn
+            ? {
+                [WA.custom]: '1',
+                [WA.contactMin]: String(vals.contactMin),
+                [WA.contactMax]: String(vals.contactMax),
+                [WA.groupMin]: String(vals.groupMin),
+                [WA.groupMax]: String(vals.groupMax),
+                [WA.ack]: isRisky(vals) && accepted ? '1' : '',
+              }
+            : { [WA.custom]: '0', [WA.ack]: '' };
+          const saved = await posApi.settings.set(entries);
+          Object.assign(settings, saved || entries);
+          toaster.success(customOn ? 'WhatsApp sending speed saved.' : 'Using the Optimized WhatsApp speed.');
+          accepted = false;
+          draw();
+        } catch (err) {
+          toaster.error(err.message);
+          saveBtn.disabled = false;
+        }
+      });
+    }
+    draw();
   }
 
   // ---------------- Business Day (one start time drives every day-based view) ----------------
@@ -767,10 +1077,13 @@ export function renderSettings() {
       deleteBtn.addEventListener('click', async () => {
         const range = computeRange();
         if (!range || previewCount === null || previewCount === 0) return;
-        const confirmed = window.confirm(
-          `Remove ${previewCount} order${previewCount === 1 ? '' : 's'} (${labelFor(preset)}) from Order History and Reports & Analytics?\n\n` +
-            `Customer records and their data are not affected - only these orders' visibility in History and Reports changes.`
-        );
+        const confirmed = await confirmAction({
+          title: 'Clear orders?',
+          message:
+            `Remove ${previewCount} order${previewCount === 1 ? '' : 's'} (${labelFor(preset)}) from Order History and Reports & Analytics?\n\n` +
+            `Customer records are not affected. Only these orders are hidden from History and Reports.`,
+          confirmLabel: 'Clear',
+        });
         if (!confirmed) return;
         deleteBtn.disabled = true;
         deleteBtn.textContent = 'Clearing…';

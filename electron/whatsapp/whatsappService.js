@@ -38,6 +38,7 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const puppeteer = require('puppeteer');
 const QRCode = require('qrcode');
 const campaignStore = require('./campaignStore');
+const timingRules = require('./timing');
 
 // ---- Anti-ban tuning -------------------------------------------------
 // Gap between two contacts inside the SAME group of 15.
@@ -93,6 +94,45 @@ let loopRunning = false;
 /** Set true to make the current loop exit at its next check point. */
 let stopRequested = false;
 
+/**
+ * Licence guard, set once by main.js. A campaign takes hours (6-15 minute waits between groups),
+ * so a licence can expire in the middle of one. The IPC gate only stops NEW commands; this makes the
+ * running loop itself stop at its next check point. The campaign is saved as "stopped" and can be
+ * resumed once the licence is renewed.
+ */
+let licenseLockedFn = null;
+
+/** Where the sending speed comes from (Settings > WhatsApp). Set by main.js; must return the RAW saved
+ *  settings object - it is resolved and clamped by timing.js before every wait. */
+let timingProvider = null;
+function setTimingProvider(fn) {
+  timingProvider = typeof fn === 'function' ? fn : null;
+}
+function currentTiming() {
+  try {
+    return timingRules.resolveTiming(timingProvider ? timingProvider() : {});
+  } catch {
+    return timingRules.resolveTiming({}); // anything odd -> the safe defaults
+  }
+}
+function setLicenseGuard(fn) {
+  licenseLockedFn = typeof fn === 'function' ? fn : null;
+}
+function shouldStop() {
+  if (stopRequested) return true;
+  let locked = false;
+  try {
+    locked = !!(licenseLockedFn && licenseLockedFn());
+  } catch {
+    locked = false; // a broken guard must never silently kill a campaign
+  }
+  if (locked) {
+    stopRequested = true;
+    logEvent('Campaign paused: the POS license is not active. Renew it, then resume the campaign.');
+  }
+  return stopRequested;
+}
+
 /** Set once by initClient() so a saved template's stored relative image
  *  path (e.g. "deal-images/template-7.jpg") can be resolved to a real
  *  absolute path when a campaign is started from a template. */
@@ -142,7 +182,7 @@ function checkInternet() {
 /** Polls every RECONNECT_POLL_MS until the DNS probe succeeds again. */
 async function waitForInternet(onStillDown) {
   // eslint-disable-next-line no-await-in-loop
-  while (!(await checkInternet())) {
+  while (!shouldStop() && !(await checkInternet())) {
     onStillDown();
     // eslint-disable-next-line no-await-in-loop
     await sleep(RECONNECT_POLL_MS);
@@ -157,7 +197,7 @@ function sleep(ms) {
  *  so a 6-15 minute inter-group wait can still be cancelled promptly. */
 async function interruptibleSleep(ms) {
   let remaining = ms;
-  while (remaining > 0 && !stopRequested) {
+  while (remaining > 0 && !shouldStop()) {
     // eslint-disable-next-line no-await-in-loop
     await sleep(Math.min(WAIT_POLL_MS, remaining));
     remaining -= WAIT_POLL_MS;
@@ -567,6 +607,17 @@ async function runQueue(media) {
   loopRunning = true;
   stopRequested = false;
 
+  {
+    const t = currentTiming();
+    if (t.custom && t.usingSafeFallback) {
+      logEvent('Custom sending speed ignored: it is faster than the safe limit and the risk was not confirmed. Using the recommended speed.');
+    } else if (t.custom && t.risky) {
+      logEvent('Custom sending speed is ON and faster than the recommended safe limit (risk confirmed by the owner).');
+    } else if (t.custom) {
+      logEvent('Custom sending speed is ON (within the safe limit).');
+    }
+  }
+
   const state = campaignStore.getState();
   if (!state) {
     loopRunning = false;
@@ -579,7 +630,7 @@ async function runQueue(media) {
 
     const startContact = g === state.currentGroupIndex ? state.currentContactIndex : 0;
     for (let i = startContact; i < group.length; i += 1) {
-      if (stopRequested) {
+      if (shouldStop()) {
         campaignStore.setCursor(g, i);
         campaignStore.setRunState('stopped');
         emit('campaign-stopped', {});
@@ -590,10 +641,14 @@ async function runQueue(media) {
       const contact = group[i];
       // Already resolved on a previous pass (e.g. re-entering after a
       // resume) - don't re-send a contact that's already sent.
-      if (contact.status === 'sent') continue;
+      // 'uncertain' = the app closed while this one was being sent: never send it again without the owner's say-so.
+      if (contact.status === 'sent' || contact.status === 'uncertain') continue;
 
       emit('contact-status', { groupIndex: g, contactId: contact.id, status: 'sending' });
       campaignStore.setContactStatus(g, contact.id, 'sending');
+      // Write the "sending" mark to disk NOW, before anything is sent: if the app dies during the send, the next start
+      // knows exactly which customer was in flight (see campaignStore.init) and never re-sends it by itself.
+      campaignStore.flush();
 
       // Pre-flight network check right before EVERY send, per spec -
       // not just once at the top of the loop, so a mid-campaign
@@ -609,7 +664,7 @@ async function runQueue(media) {
         campaignStore.setContactStatus(g, contact.id, 'pending');
         // eslint-disable-next-line no-await-in-loop
         await waitForInternet(() => emitStatus({ message: 'Internet Disconnected! Reconnecting...' }));
-        if (stopRequested) {
+        if (shouldStop()) {
           campaignStore.setCursor(g, i);
           campaignStore.setRunState('stopped');
           emit('campaign-stopped', {});
@@ -643,9 +698,9 @@ async function runQueue(media) {
       campaignStore.setCursor(g, i + 1);
 
       const isLastContactOfLastGroup = g === state.groups.length - 1 && i === group.length - 1;
-      if (!isLastContactOfLastGroup && !stopRequested) {
+      if (!isLastContactOfLastGroup && !shouldStop()) {
         // eslint-disable-next-line no-await-in-loop
-        await sleep(randomBetween(CONTACT_MIN_DELAY_MS, CONTACT_MAX_DELAY_MS));
+        await sleep(randomBetween(currentTiming().contactMinMs, currentTiming().contactMaxMs));
       }
     }
 
@@ -654,8 +709,9 @@ async function runQueue(media) {
     emit('group-done', { groupIndex: g, sentCount: groupSent, failedCount: groupFailed });
 
     const isLastGroup = g === state.groups.length - 1;
-    if (!isLastGroup && !stopRequested) {
-      const waitMs = randomBetween(GROUP_MIN_DELAY_MS, GROUP_MAX_DELAY_MS);
+    if (!isLastGroup && !shouldStop()) {
+      const timing = currentTiming();
+      const waitMs = randomBetween(timing.groupMinMs, timing.groupMaxMs);
       const resumeAt = new Date(Date.now() + waitMs).toISOString();
       campaignStore.setCursor(g + 1, 0);
       campaignStore.setNextGroupAt(resumeAt);
@@ -663,7 +719,7 @@ async function runQueue(media) {
       // eslint-disable-next-line no-await-in-loop
       await interruptibleSleep(waitMs);
       campaignStore.setNextGroupAt(null);
-      if (stopRequested) {
+      if (shouldStop()) {
         campaignStore.setRunState('stopped');
         emit('campaign-stopped', {});
         loopRunning = false;
@@ -680,7 +736,16 @@ async function runQueue(media) {
   loopRunning = false;
 }
 
+/** The owner's answer for customers whose delivery is unknown after a crash: 'resend' or 'skip'. */
+function resolveUncertain(action) {
+  if (loopRunning) throw new Error('Stop the campaign first.');
+  return { count: campaignStore.resolveUncertain(action) };
+}
+
 module.exports = {
+  resolveUncertain,
+  setTimingProvider,
+  setLicenseGuard,
   setEventSink,
   initClient,
   getStatus,

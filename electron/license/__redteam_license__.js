@@ -72,7 +72,7 @@ function boot(clk, { stores, files, orderMs = { v: null }, publicKeys = PUBLIC_K
   return { mgr, clockStores, licenseFiles, orderMs };
 }
 
-const mint = (over = {}) => issueLicense({ privateKey: vendor.privateKey, kid: '1', hardwareId: HW, customer: 'Cheater Cafe', plan: 'Y01', ...over });
+const mint = (over = {}) => issueLicense({ privateKey: vendor.privateKey, kid: '1', hardwareId: HW, customer: 'Cheater Cafe', plan: 'Y01', tier: 'premium', ...over });
 
 const results = [];
 function report(verdict, title, detail) {

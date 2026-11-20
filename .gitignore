@@ -41,3 +41,6 @@ Thumbs.db
 # Licensing - the PRIVATE signing key and the record of issued licenses must NEVER be committed
 license-keys/
 *.pem
+
+# Master-key recovery secret (generated at build time from POS_MASTER_SECRET) - NEVER commit
+electron/security/master-secret.generated.js

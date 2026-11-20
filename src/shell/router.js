@@ -6,6 +6,7 @@ import { createDock } from './dock.js';
 import { shellStore } from './state.js';
 import { toaster } from './toast.js';
 import { getModule } from './modules.js';
+import { pageAccess, accessMessage } from './license.js';
 import { renderMenuSetup } from '../modules/menuSetup.js';
 import { renderNewOrder } from '../modules/newOrder.js';
 import { renderOrderHistory } from '../modules/orderHistory.js';
@@ -70,9 +71,11 @@ export function createRouter({ onRequestPalette, requireAccess, isLocked = () =>
     const current = shellStore.get().route;
     // No valid license: Settings is the only page that opens (the main
     // process refuses the data calls too, so this is just the polite part).
-    if (isLocked() && routeId !== 'settings') {
-      toaster.error('The POS is locked. Enter your license key in Settings > License.');
-      if (current !== 'settings') return navigate('settings');
+    // The license decides which pages open: Free = Settings only, Pro = all but WhatsApp,
+    // Premium = everything. (The main process refuses the data calls too; this is the polite part.)
+    if (routeId !== 'dashboard' && !pageAccess(routeId).allowed) {
+      toaster.error(accessMessage(routeId));
+      if (isLocked() && current !== 'settings') return navigate('settings');
       return;
     }
     if (routeId === current) return;

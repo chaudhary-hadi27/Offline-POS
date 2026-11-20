@@ -8,7 +8,7 @@
  *   license key   POS1.<payload>.<signature>     (base64url, no spaces)
  *   repair code   POS1R.<payload>.<signature>
  *
- * payload (license): { v, kid, mid, plan, cust, iat, exp, epoch }   times in epoch SECONDS
+ * payload (license): { v, kid, mid, plan, tier?, cust, iat, exp, epoch }   tier = 'pro' | 'premium' (absent on old keys)   times in epoch SECONDS
  * payload (repair):  { v, kid, type:'repair', mid, now }
  *
  * The signature covers a domain tag + the exact payload bytes, so a license
@@ -25,9 +25,14 @@ const REPAIR_DOMAIN = 'POS-REPAIR-V1\n';
 
 const b64u = (buf) => Buffer.from(buf).toString('base64url');
 
-/** Strip every kind of whitespace (a key pasted from WhatsApp is often wrapped). */
+/**
+ * Strip whitespace AND every invisible "format" character (Unicode category Cf): zero-width
+ * spaces, the left-to-right / right-to-left marks and bidi embeddings that chat apps insert
+ * around text typed in Urdu/Arabic, word joiners, soft hyphens, the BOM. A real key is plain
+ * base64url, so nothing legitimate is lost.
+ */
 function cleanKeyText(text) {
-  return String(text || '').replace(/[\s\u200B-\u200D\uFEFF]+/g, '');
+  return String(text || '').replace(/[\s\p{Cf}]+/gu, '');
 }
 
 /** "a1b2-c3d4 ..." -> "A1B2C3D4..." so IDs compare regardless of dashes/case. */

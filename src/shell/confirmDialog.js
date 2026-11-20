@@ -24,6 +24,9 @@ import { attachRipple } from './ripple.js';
  * @param {string|null} [opts.requireTypedConfirmation]
  * @returns {Promise<boolean>}
  */
+const escText = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const withBreaks = (v) => escText(v).replace(/\n/g, '<br>');
+
 export function confirmAction({
   title = 'Are you sure?',
   message = '',
@@ -33,6 +36,7 @@ export function confirmAction({
   requireTypedConfirmation = null,
 } = {}) {
   return new Promise((resolve) => {
+    const previouslyFocused = document.activeElement; // so typing continues where it was after the dialog closes
     const isDanger = tone === 'danger';
     const iconTone = isDanger ? 'bg-red-50 text-red-600' : 'bg-accent/10 text-accent';
     const btnTone = isDanger ? 'bg-red-600 hover:bg-red-700' : 'bg-accent hover:bg-accent-hover';
@@ -47,14 +51,14 @@ export function confirmAction({
             <span class="h-5 w-5">${iconMarkup(isDanger ? 'alertTriangle' : 'lock')}</span>
           </span>
           <div class="pt-0.5">
-            <h2 class="font-display text-base font-bold text-ink">${title}</h2>
-            <p class="mt-1 text-sm text-ink-secondary">${message}</p>
+            <h2 class="font-display text-base font-bold text-ink">${escText(title)}</h2>
+            <p class="mt-1 text-sm text-ink-secondary">${withBreaks(message)}</p>
           </div>
         </div>
         ${
           requireTypedConfirmation
             ? `<label class="mb-4 flex flex-col gap-1 text-xs text-ink-secondary">
-                 Type "<span class="font-medium text-ink">${requireTypedConfirmation}</span>" to confirm
+                 Type "<span class="font-medium text-ink">${escText(requireTypedConfirmation)}</span>" to confirm
                  <input type="text" id="cf-typed" autocomplete="off"
                    class="rounded-lg border border-border px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
                </label>`
@@ -63,12 +67,12 @@ export function confirmAction({
         <div class="flex justify-end gap-2">
           <button type="button" id="cf-cancel"
             class="ripple-host rounded-xl border border-border px-4 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-raised">
-            ${cancelLabel}
+            ${escText(cancelLabel)}
           </button>
           <button type="button" id="cf-confirm"
             class="ripple-host rounded-xl px-4 py-2 text-sm font-medium text-white transition-colors ${btnTone}"
             ${requireTypedConfirmation ? 'disabled' : ''}>
-            ${confirmLabel}
+            ${escText(confirmLabel)}
           </button>
         </div>
       </div>
@@ -89,6 +93,7 @@ export function confirmAction({
     function cleanup(result) {
       document.removeEventListener('keydown', onKeydown);
       overlay.remove();
+      if (previouslyFocused && document.body.contains(previouslyFocused) && typeof previouslyFocused.focus === 'function') previouslyFocused.focus();
       resolve(result);
     }
     function onKeydown(event) {
@@ -105,6 +110,7 @@ export function confirmAction({
       requestAnimationFrame(() => typedInput.focus());
     }
 
+    if (!requireTypedConfirmation) requestAnimationFrame(() => cancelBtn.focus()); // Enter / Space = the safe choice
     overlay.querySelector('.cf-scrim').addEventListener('click', () => cleanup(false));
     cancelBtn.addEventListener('click', () => cleanup(false));
     confirmBtn.addEventListener('click', () => {

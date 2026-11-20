@@ -4,7 +4,10 @@ import { posApi } from '../shell/posApi.js';
 import { iconMarkup } from '../shell/icons.js';
 import { attachRipple } from '../shell/ripple.js';
 import { toaster } from '../shell/toast.js';
+import { confirmAction } from '../shell/confirmDialog.js';
 import { searchBarHtml, wireSearchBar } from '../shell/searchBar.js';
+
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const GROUP_SIZE = 15; // must match campaignStore.CONTACTS_PER_GROUP on the main-process side
 
@@ -546,7 +549,7 @@ export function renderWhatsappDeals() {
   }
 
   async function deleteTemplate(id, name) {
-    if (!window.confirm(`Delete the "${name}" template? This cannot be undone.`)) return;
+    if (!(await confirmAction({ title: 'Delete template?', message: `Delete the "${name}" template? This cannot be undone.`, confirmLabel: 'Delete' }))) return;
     try {
       await posApi.whatsapp.templates.remove(id);
       if (selectedTemplateId === id) selectedTemplateId = null;
@@ -773,8 +776,10 @@ export function renderWhatsappDeals() {
     const flat = flatContacts();
     const sent = flat.filter((c) => c.status === 'sent').length;
     const failed = flat.filter((c) => c.status === 'failed').length;
-    const remaining = flat.length - sent - failed;
-    return { sent, failed, remaining, total: flat.length };
+    // "uncertain" = the app closed while this customer's message was being sent: delivery unknown
+    const uncertain = flat.filter((c) => c.status === 'uncertain').length;
+    const remaining = flat.length - sent - failed - uncertain;
+    return { sent, failed, uncertain, remaining, total: flat.length };
   }
 
   function ensureCountdownTimer() {
@@ -891,7 +896,7 @@ export function renderWhatsappDeals() {
       return;
     }
 
-    const { sent, failed, remaining, total } = countsByStatus();
+    const { sent, failed, uncertain, remaining, total } = countsByStatus();
     const percent = total ? Math.round(((sent + failed) / total) * 100) : 0;
     const running = isRunning();
     const runPill = RUN_STATE_PILL[session.runState] || RUN_STATE_PILL.completed;
@@ -916,6 +921,18 @@ export function renderWhatsappDeals() {
         <h2 class="font-display text-sm font-bold text-ink">Sending Progress</h2>
         <span class="rounded-full px-2.5 py-1 text-[11px] font-medium ${runPill.tone}">${runPill.label}</span>
       </header>
+      ${
+        uncertain > 0 && !running
+          ? `<div class="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+               <p class="mb-2 flex items-center gap-2 font-semibold"><span class="h-4 w-4">${iconMarkup('alertTriangle')}</span>${uncertain} customer${uncertain === 1 ? '' : 's'}: not sure if the message went</p>
+               <p class="mb-3 text-xs">The app closed while sending to ${flatContacts().filter((c) => c.status === 'uncertain').slice(0, 3).map((c) => esc(c.name)).join(', ')}${uncertain > 3 ? '...' : ''}.</p>
+               <div class="flex flex-wrap gap-2">
+                 <button type="button" id="wa-unsure-resend" class="ripple-host rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700">Send again</button>
+                 <button type="button" id="wa-unsure-skip" class="ripple-host rounded-lg border border-amber-400 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100">Skip</button>
+               </div>
+             </div>`
+          : ''
+      }
       <div class="mb-3 flex flex-wrap items-center justify-end gap-2">
         ${
           running
@@ -976,6 +993,8 @@ export function renderWhatsappDeals() {
                       ? `<span class="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#16A34A]/10 text-[#16A34A]"><span class="h-3 w-3">${iconMarkup('check')}</span></span>`
                       : r.status === 'failed'
                       ? `<span class="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#DC2626]/10 text-[#DC2626]"><span class="h-3 w-3">${iconMarkup('close')}</span></span>`
+                      : r.status === 'uncertain'
+                      ? `<span class="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700"><span class="h-3 w-3">${iconMarkup('alertTriangle')}</span></span>`
                       : r.status === 'sending'
                       ? `<span class="flex h-5 w-5 flex-shrink-0 items-center justify-center"><span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent"></span></span>`
                       : `<span class="flex h-5 w-5 flex-shrink-0 items-center justify-center text-ink-muted"><span class="h-3 w-3">${iconMarkup('clock')}</span></span>`;
@@ -1000,6 +1019,22 @@ export function renderWhatsappDeals() {
           await posApi.whatsapp.stopCampaign();
         } catch (err) {
           toaster.error(err.message);
+        }
+      });
+    }
+    for (const [id, action] of [['#wa-unsure-resend', 'resend'], ['#wa-unsure-skip', 'skip']]) {
+      const btn = container.querySelector(id);
+      if (!btn) continue;
+      attachRipple(btn);
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await posApi.whatsapp.resolveUncertain(action);
+          await refreshSession();
+          toaster.success(action === 'resend' ? 'Queued again. Press Resume sending.' : 'Skipped. They are in the Failed list.');
+        } catch (err) {
+          toaster.error(err.message);
+          btn.disabled = false;
         }
       });
     }
@@ -1076,7 +1111,7 @@ export function renderWhatsappDeals() {
       return;
     }
     if (session && session.runState !== 'completed' && countsByStatus().remaining > 0) {
-      if (!window.confirm('There is an unfinished session (paused/failed items). Starting a new "Send All" will replace it. Continue?')) {
+      if (!(await confirmAction({ title: 'Start a new send?', message: 'There is an unfinished send. Starting a new one will replace it.', confirmLabel: 'Start new', tone: 'default' }))) {
         return;
       }
     }
@@ -1100,7 +1135,7 @@ export function renderWhatsappDeals() {
       toaster.error('Stop the current send before starting a new campaign.');
       return;
     }
-    if (session && !window.confirm('This clears the current sent/remaining/failed list. Continue?')) return;
+    if (session && !(await confirmAction({ title: 'Clear this list?', message: 'This clears the current sent / remaining / failed list.', confirmLabel: 'Clear', tone: 'default' }))) return;
     try {
       await posApi.whatsapp.newCampaign();
     } catch (err) {

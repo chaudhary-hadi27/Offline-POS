@@ -18,7 +18,7 @@ one-time code when a customer calls you locked out.
 Anything at least 16 characters, random-ish. Example only — pick your own:
 
 ```
-SmartKode-Restaurant-Master-2026-XyZ
+<a-long-random-secret-only-you-know>
 ```
 
 Write it down somewhere safe (a password manager, a notes app, a locked
@@ -30,13 +30,13 @@ same secret forever, for every restaurant you ever sell this POS to.
 
 **Windows (PowerShell):**
 ```powershell
-$env:POS_MASTER_SECRET="SmartKode-Restaurant-Master-2026-XyZ"
+$env:POS_MASTER_SECRET="<a-long-random-secret-only-you-know>"
 npm run dist:win
 ```
 
 **Mac/Linux terminal:**
 ```bash
-POS_MASTER_SECRET="SmartKode-Restaurant-Master-2026-XyZ" npm run dist:win
+POS_MASTER_SECRET="<a-long-random-secret-only-you-know>" npm run dist:win
 ```
 
 That's it — `npm run dist:win` automatically bakes your secret into the app
@@ -225,3 +225,6 @@ for this app, with a `whatsapp-session` folder inside it.)
   goes without internet for too long, or if WhatsApp logs the linked
   device out — the "Log out → reconnect" steps above always fix that.
 
+
+
+> **Never reuse an example value, and never commit `electron/security/master-secret.generated.js`** (it is git-ignored; the build creates it from `POS_MASTER_SECRET`). A previous secret was published in the public repository - `npm run dist:win` refuses to build with it.

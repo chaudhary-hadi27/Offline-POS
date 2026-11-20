@@ -120,6 +120,10 @@ function createLicenseFiles({ userDataDir, secondaryDir = defaultSecondaryDir() 
       }
       return text;
     },
+    async clear() {
+      await fsp.rm(primary, { force: true }).catch(() => {});
+      await fsp.rm(secondary, { force: true }).catch(() => {});
+    },
     async save(text) {
       await atomicWrite(primary, text);
       await atomicWrite(secondary, text).catch(() => {});

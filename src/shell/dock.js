@@ -3,6 +3,7 @@
 import { MODULES } from './modules.js';
 import { iconMarkup } from './icons.js';
 import { attachRipple } from './ripple.js';
+import { pageAccess, onLicenseChange, tierLabel } from './license.js';
 
 const COLLAPSED_WIDTH = '0px';
 const EXPANDED_WIDTH = '76px';
@@ -73,8 +74,27 @@ export function createDock({ onNavigate }) {
     btn.addEventListener('click', () => onNavigate(mod.id));
     attachRipple(btn);
     buttons.set(mod.id, btn);
+    const dot = document.createElement('span');
+    dot.dataset.tierDot = '1';
+    dot.className = 'absolute -right-0.5 -top-0.5 hidden h-2.5 w-2.5 rounded-full ring-2 ring-surface-raised';
+    btn.appendChild(dot);
     el.appendChild(btn);
   });
+
+  // Icons for pages the license does not include are dimmed and carry a small tier dot.
+  function applyAccess() {
+    buttons.forEach((btn, id) => {
+      const a = pageAccess(id);
+      btn.classList.toggle('opacity-50', !a.allowed);
+      const dot = btn.querySelector('[data-tier-dot]');
+      dot.classList.toggle('hidden', a.allowed);
+      dot.classList.toggle('bg-amber-400', a.required === 'premium');
+      dot.classList.toggle('bg-sky-400', a.required === 'pro');
+      btn.title = a.allowed ? '' : `Needs the ${tierLabel(a.required)} license`;
+    });
+  }
+  applyAccess();
+  onLicenseChange(applyAccess);
 
   function setActive(routeId) {
     buttons.forEach((btn, id) => {
